@@ -15,7 +15,8 @@ const RESTAURANT_TAXONOMY = [
     label: "Cigarette purchases",
     aliases: ["cigarette", "cigar", "tobacco", "smoke"],
     keywords: [
-      "classic connect", "cl ice burst", "ice burst", "classic bt", "classic", "marlboro", "gold flake", "wills", "benson", "lights", "king size", "switch", "capsule", "advance", "total", "esse", "dunhill", "cigarette", "cigarettes", "cigar"
+      "classic connect", "cl ice burst", "ice burst", "classic bt", "marlboro", "gold flake", "wills", "benson", "king size", "switch", "capsule", "esse", "dunhill", "cigarette", "cigarettes", "cigar"
+      // NOTE: "classic" removed — too generic and matches e.g. "Bacardi Classic". Cigarettes must match via longer phrases or context.
     ]
   },
   {
@@ -64,7 +65,7 @@ const RESTAURANT_TAXONOMY = [
       "redbull", "red bull", "monster energy", "sting", "ocean fruit water",
       "tonic water", "ginger ale", "gingerale", "club soda", "soda water", "lehar soda", "kinley soda", "soda",
       "diet coke", "coke zero", "coca cola", "coke", "pepsi", "diet pepsi", "7up", "sprite", "thums up", "limca", "fanta", "mirinda", "mountain dew",
-      "tropicana", "minute maid", "frooti", "maaza", "slice", "appy fizz", "appy", "raw pressery", "paper boat", "juice",
+      "tropicana", "minute maid", "frooti", "maaza", "maaza slice", "appy fizz", "appy", "raw pressery", "paper boat", "juice",
       "bisleri", "kinley water", "aquafina", "vedica", "himalayan water", "packaged water", "mineral water",
       "blue curacao", "grenadine", "mojito syrup", "peach syrup", "watermelon syrup", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush", "orange crush", "pineapple crush", "monin", "malas", "malass", "crush", "syrup", "fruit syrup"
     ]
@@ -74,11 +75,11 @@ const RESTAURANT_TAXONOMY = [
     label: "Groceries",
     aliases: ["grocer", "food and grocery", "food & grocery", "provision", "dry good", "raw material", "staple", "spices", "grain"],
     keywords: [
-      "sona masoori", "basmati rice", "kolam rice", "rice", "basmati", "kolam", "wheat", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
+      "sona masoori", "basmati rice", "kolam rice", "rice", "basmati", "kolam", "wheat flour", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
       "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal", "kabuli chana", "rajma", "soya chunks", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "breadcrumbs", "dal", "lentil", "lentils",
       "garam masala", "chaat masala", "biryani masala", "kitchen king", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "coriander seed", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "red chilli", "kashmiri chilli", "degi mirch", "chili flakes",
-      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
-      "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil", "oil",
+      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika", "thai red chilli", "thai chilli",
+      "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil",
       "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee", // Rule: Ghee is Groceries
       "brown sugar", "jaggery", "gur", "honey", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg", "sugar", "salt",
       "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "vinegar", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri", "ketchup", "sauce",
@@ -111,8 +112,8 @@ const RESTAURANT_TAXONOMY = [
     label: "Kitchen tools",
     aliases: ["kitchen tool", "kitchen tools", "utensil", "utensils", "crockery", "cutlery", "hotelware", "equipment", "bar tool"],
     keywords: [
-      "dal katori", "vertigo cream", "katori", "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
-      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware",
+      "dal katori", "vertigo cream", "katori", "dip bowl", "soup bowl", "dip bowl round", "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
+      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware", "arcoroc", "pilsner glass", "beer glass", "wine glass", "shot glass", "whisky glass",
       "cocktail shaker", "bar strainer", "jigger", "peg measurer", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
     ]
   },
@@ -155,7 +156,7 @@ const RESTAURANT_TAXONOMY = [
     aliases: ["fruit", "fresh fruit"],
     keywords: [
       "sweet lime", "fresh mango", "blueberry fresh",
-      "apple", "seb", "banana", "kela", "orange", "santra", "mosambi", "pomegranate", "anar", "watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "pineapple", "ananas", "mango", "aam", "grapes", "angoor", "strawberry", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
+      "fresh apple", "seb", "banana", "kela", "fresh orange", "santra", "mosambi", "pomegranate", "anar", "fresh watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "fresh pineapple", "ananas", "fresh mango", "aam", "grapes", "angoor", "fresh strawberry", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
     ]
   },
   {
@@ -195,6 +196,27 @@ function accountMatchesCategory(actualAccount, category) {
   return false;
 }
 
+// Veto rules: if item contains these signals, ignore certain category matches
+const VETO_RULES = [
+  // Alcohol keywords block cigarette classification
+  { blockedCategoryId: "cigarettes", ifItemContains: ["rum", "vodka", "whisky", "whiskey", "gin", "tequila", "brandy", "wine", "beer", "scotch", "bourbon", "liqueur", "bacardi", "smirnoff", "absolut"] },
+  // "soap" or "detergent" in item name blocks grocery oil match
+  { blockedCategoryId: "groceries", ifItemContains: ["soap", "detergent", "cleaner", "liquid soap", "dishwash"] },
+  // "monin" or "syrup" blocks fruit classification
+  { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial"] },
+  { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial"] },
+];
+
+function isVetoed(categoryId, itemNorm) {
+  return VETO_RULES.some(rule =>
+    rule.blockedCategoryId === categoryId &&
+    rule.ifItemContains.some(signal => {
+      const escaped = signal.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+      return new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i").test(itemNorm);
+    })
+  );
+}
+
 // Find expected category for an item description using strict word-boundary matching
 function classifyItem(itemName) {
   const norm = cleanWords(itemName);
@@ -204,12 +226,15 @@ function classifyItem(itemName) {
   let maxKeywordLen = 0;
 
   for (const cat of RESTAURANT_TAXONOMY) {
+    // Skip this category if a veto rule blocks it for this item
+    if (isVetoed(cat.id, norm)) continue;
+
     for (const kw of cat.keywords) {
       const normKw = cleanWords(kw);
       if (!normKw) continue;
 
       // Strict matching: keyword must match as complete whole words
-      // e.g. "classic" will match "classic connect" as a word, but "lassi" will NEVER match "classic"
+      // e.g. "classic bt" will NOT match "Bacardi Classic" since "classic" alone is no longer a keyword
       const escaped = normKw.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
       const wordRegex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i");
 
