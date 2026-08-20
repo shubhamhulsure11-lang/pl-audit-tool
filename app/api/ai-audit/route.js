@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
 
-// Known non-chat model patterns to exclude (audio, vision-only, embedding, etc.)
-const EXCLUDE_PATTERNS = ["whisper", "tts", "distil", "embed", "vision", "playai", "playht"];
+// Exclude non-chat models (audio, tts, embedding, vision-only)
+const EXCLUDE_PATTERNS = ["whisper", "tts", "distil", "embed", "vision", "playai", "playht", "guard"];
 
-// Preferred chat model substrings in order of quality (higher = better)
+// Prefer fast models with higher free-tier TPM limits first
 const MODEL_PREFERENCES = [
+  "llama-3.1-8b-instant",
+  "llama3-8b",
+  "llama-3.1-8b",
   "llama-3.3-70b",
   "llama-3.1-70b",
   "llama3-70b",
-  "deepseek",
-  "qwen",
-  "llama-3.1-8b",
-  "llama3-8b",
   "llama",
   "mixtral",
   "gemma2",
@@ -26,7 +25,6 @@ async function pickBestGroqModel(apiKey) {
     if (!res.ok) return null;
     const data = await res.json();
 
-    // Only keep chat/LLM models — exclude audio, tts, embed, etc.
     const chatIds = (data.data || [])
       .map((m) => m.id)
       .filter((id) => !EXCLUDE_PATTERNS.some((pat) => id.toLowerCase().includes(pat)));
@@ -35,8 +33,6 @@ async function pickBestGroqModel(apiKey) {
       const found = chatIds.find((id) => id.toLowerCase().includes(pref));
       if (found) return found;
     }
-
-    // Fallback: first remaining chat model
     return chatIds[0] || null;
   } catch {
     return null;
@@ -60,56 +56,48 @@ export async function POST(req) {
       return NextResponse.json({ error: "No items provided for analysis." }, { status: 400 });
     }
 
-    // Auto-discover the best available model for this API key
     const model = await pickBestGroqModel(apiKey);
     if (!model) {
       return NextResponse.json(
-        { error: "Could not find any available Groq model for your API key. Please verify the key at console.groq.com." },
+        { error: "Could not find any available Groq model. Please verify the key at console.groq.com." },
         { status: 400 }
       );
     }
 
-    const itemsToAudit = items.slice(0, 30);
+    // Compact rules to minimize prompt tokens
+    const RULES = `Rules:
+1.Groceries:rice,dal,atta,maida,sooji,spices,masala,oil,sugar,salt,sauces,vinegar,dry fruits,ghee
+2.Dairy:milk,paneer,curd,dahi,cream,butter,cheese,khoya,buttermilk
+3.Poultry:chicken,mutton,lamb,goat,eggs
+4.Sea food purchases:fish,basa,surmai,pomfret,rawas,salmon,tuna,prawns,shrimp,crab,lobster,squid
+5.Beverages(non-alcoholic only):red bull,tonic,soda,juice,monin,malas,mineral water,limca,sprite,thums up,tea,coffee
+6.Liquor Purchases(alcoholic only):wine,beer,whisky,vodka,rum,gin,tequila,brandy,champagne,scotch,bourbon
+7.Cigarette purchases:classic,ice burst,marlboro,gold flake,wills,beedi,hookah tobacco
+8.Other Purchases:charcoal,coal,ice cubes,ice slabs,dry ice,skewers,toothpicks
+9.Packing materials/Packaging & Disposables(same category):trays,boxes,paper bags,tissues,foil,cling wrap,straws,disposable cutlery
+10.Cleaning and housekeeping:dishwash,detergent,lizol,phenyl,harpic,bleach,sanitizer,brooms,mops,garbage bags
+11.Kitchen tools:utensils,kadai,tawa,knives,chopping boards,crockery,cocktail shakers
+12.Stationery & Office:registers,KOT books,bill books,pens,POS rolls,thermal paper`;
 
-    const systemPrompt = `You are an expert restaurant accounting auditor in India. Your job is to identify misclassified purchase items in a restaurant's Zoho Books accounts.
+    // Send only 10 items per call to stay under free-tier TPM limit
+    const itemsToAudit = items.slice(0, 10).map(({ item, vendor, actualAccount }) => ({ item, vendor, actualAccount }));
+    const accounts = (availableAccounts || []).join(",");
 
-RESTAURANT ACCOUNTING RULES:
-1. Groceries: Food raw materials — rice, dal, wheat, atta, maida, sooji, spices, masala, cooking oil, sugar, salt, sauces, vinegar, dry fruits, pickles, flour. GHEE is always Groceries.
-2. Dairy: Milk, paneer, curd, dahi, fresh cream, butter, cheese, khoya, mawa, buttermilk.
-3. Poultry: Chicken, mutton, lamb, goat meat, eggs, quail.
-4. Sea food purchases: Fish (Basa, Surmai, Pomfret, Rawas, Salmon, Tuna), Prawns (any size like 16/20, 21/25), Shrimp, Crab, Lobster, Squid, Octopus.
-5. Beverages: Non-alcoholic ONLY — Red Bull, energy drinks, Tonic Water, Diet Coke, Sodas, Real Juices, Fruit Syrups like Monin/Malas, Packaged Mineral Water, Limca, Sprite, Thums Up, Tea, Coffee, Kokum, Sharbat.
-6. Liquor Purchases: Alcoholic beverages ONLY — Wine, Beer, Whisky, Vodka, Rum, Gin, Tequila, Brandy, Champagne, Shiraz, Cabernet, Sauvignon, Scotch, Bourbon, Sake, Mead. NOT beverages.
-7. Cigarette purchases: Cigarettes and tobacco — Classic Connect, Classic Regular, Classic Milds, Ice Burst, Marlboro, Gold Flake, Wills Navy Cut, Beedi, Hookah tobacco.
-8. Other Purchases: Charcoal, Coal, Ice cubes, Ice slabs, Dry ice, wooden skewers, toothpicks.
-9. Packing materials / Packaging & Disposables: Both names are the SAME category. Meal trays, takeaway boxes, paper bags, tissues, napkins, aluminium foil, cling wrap, straws, disposable plates/cutlery.
-10. Cleaning and housekeeping: Dishwash liquid, detergents, floor cleaners (Lizol, Phenyl, Domex), Colin, Harpic, bleach, sanitizers, brooms, mops, garbage bags.
-11. Kitchen tools: Utensils, kadai, tawa, knives, chopping boards, crockery, hotelware, cocktail shakers.
-12. Stationery & Office: Registers, KOT books, bill books, pens, POS rolls, thermal paper, toners.
-
-You MUST return ONLY valid JSON — no explanation, no markdown, no extra text. Just the raw JSON array.`;
-
-    const userMessage = `Evaluate these items for misclassification.
-AVAILABLE ACCOUNT HEADS: ${(availableAccounts || []).join(", ")}
-ITEMS: ${JSON.stringify(itemsToAudit, null, 2)}
-
-Return a JSON array of ONLY misclassified items. If nothing is wrong, return [].
-Format: [{"item":"...","vendor":"...","actualAccount":"...","suggestedAccount":"one of the AVAILABLE ACCOUNT HEADS","isMisclassified":true,"webSummary":"what this product actually is","reason":"why the current account head is wrong"}]`;
+    const prompt = `You are a restaurant accounting auditor in India.
+${RULES}
+Available account heads: ${accounts}
+Items to check: ${JSON.stringify(itemsToAudit)}
+Return ONLY a JSON array of misclassified items (empty array [] if all correct):
+[{"item":"","vendor":"","actualAccount":"","suggestedAccount":"","webSummary":"","reason":""}]`;
 
     const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`
-      },
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage }
-        ],
+        messages: [{ role: "user", content: prompt }],
         temperature: 0.1,
-        max_tokens: 4096
+        max_tokens: 1500
       })
     });
 
