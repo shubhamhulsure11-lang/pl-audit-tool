@@ -73,19 +73,19 @@ const RESTAURANT_TAXONOMY = [
   {
     id: "groceries",
     label: "Groceries",
-    aliases: ["grocer", "food and grocery", "food & grocery", "provision", "dry good", "raw material", "staple", "spices", "grain"],
+    aliases: ["grocer", "food and grocery", "food & grocery", "food purchase", "provision", "dry good", "raw material", "staple", "spices", "grain"],
     keywords: [
       "sona masoori", "basmati rice", "kolam rice", "rice", "basmati", "kolam", "wheat flour", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
       "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal", "kabuli chana", "rajma", "soya chunks", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "breadcrumbs", "dal", "lentil", "lentils",
-      "garam masala", "chaat masala", "biryani masala", "kitchen king", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "coriander seed", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "red chilli", "kashmiri chilli", "degi mirch", "chili flakes",
-      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika", "thai red chilli", "thai chilli",
+      "garam masala", "chaat masala", "biryani masala", "kitchen king", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "coriander seed", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "kashmiri chilli", "degi mirch", "chili flakes",
+      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
       "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil",
       "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee", // Rule: Ghee is Groceries
       "brown sugar", "jaggery", "gur", "honey", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg", "sugar", "salt",
       "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "vinegar", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri", "ketchup", "sauce",
-      "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut",
+      "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut", "black olive", "green olive", "olive slice",
       "cashew", "kaju", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
-      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "food color"
+      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla 4ltr", "food color"
     ]
   },
   {
@@ -113,25 +113,26 @@ const RESTAURANT_TAXONOMY = [
     aliases: ["kitchen tool", "kitchen tools", "utensil", "utensils", "crockery", "cutlery", "hotelware", "equipment", "bar tool"],
     keywords: [
       "dal katori", "vertigo cream", "katori", "dip bowl", "soup bowl", "dip bowl round", "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
-      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware", "arcoroc", "pilsner glass", "beer glass", "wine glass", "shot glass", "whisky glass",
+      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware", "arcoroc", "pilsner glass", "beer glass", "pilsner", "wine glass", "shot glass", "whisky glass",
       "cocktail shaker", "bar strainer", "jigger", "peg measurer", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
     ]
   },
   {
     id: "cleaning",
     label: "Cleaning and housekeeping",
-    aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent"],
+    aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent", "soap"],
     keywords: [
       "dishwash bar", "dishwash liquid", "dishwash", "vim bar", "vim liquid", "vim", "exo", "pril", "surf excel", "surf", "ariel", "tide", "rin", "detergent powder", "liquid detergent", "detergent",
+      "soap oil", "soap oil thick", "liquid soap",
       "floor cleaner", "lizol", "phenyl", "white phenyl", "colin", "glass cleaner", "harpic", "toilet cleaner", "bathroom cleaner", "drain cleaner", "caustic soda",
-      "bleaching powder", "bleach", "disinfectant", "hand sanitizer", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon", "liquid soap",
+      "bleaching powder", "bleach", "disinfectant", "hand sanitizer", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon",
       "phool jhadu", "coconut broom", "broom", "jhadu", "mop", "floor wiper", "wiper", "duster", "cleaning cloth", "microfiber cloth", "sponge", "steel scrubber", "green scrubber", "scrubber", "scotch brite", "garbage bag", "trash bag", "dustbin cover", "dust pan", "rubber gloves", "room freshener", "odonil"
     ]
   },
   {
     id: "packaging",
     label: "Packaging & Disposables",
-    aliases: ["packag", "disposab", "takeaway", "parcel", "container"],
+    aliases: ["packag", "packing", "pack", "disposab", "takeaway", "parcel", "container"],
     keywords: [
       "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box", "plastic container", "container",
       "kraft paper bag", "non woven bag", "d-cut bag", "paper bag", "carry bag", "zip lock", "polythene",
@@ -144,9 +145,9 @@ const RESTAURANT_TAXONOMY = [
   {
     id: "vegetables",
     label: "Fresh Vegetables",
-    aliases: ["vegetable", "fresh veg", "veggie", "greens", "sabzi"],
+    aliases: ["vegetable", "fresh veg", "veggie", "greens", "sabzi", "tarkari"],
     keywords: [
-      "green chilli", "hari mirch", "bell pepper", "shimla mirch", "capsicum", "green peas", "matar", "coriander leaves", "fresh dhania", "mint leaves", "pudina", "curry leaves", "kadi patta", "spring onion", "button mushroom", "baby corn", "sweet corn", "lady finger", "bottle gourd", "bitter gourd", "raw banana",
+      "thai red chilli", "thai chilli", "green chilli", "hari mirch", "bell pepper", "shimla mirch", "capsicum", "green peas", "matar", "coriander leaves", "fresh dhania", "mint leaves", "pudina", "curry leaves", "kadi patta", "spring onion", "button mushroom", "baby corn", "sweet corn", "lady finger", "bottle gourd", "bitter gourd", "raw banana",
       "onion", "pyaz", "potato", "aloo", "tomato", "tamatar", "ginger", "adrak", "garlic", "lahsun", "carrot", "gajar", "beans", "cabbage", "cauliflower", "broccoli", "spinach", "palak", "methi", "lettuce", "iceberg", "cucumber", "kheera", "beetroot", "radish", "mooli", "leek", "celery", "zucchini", "mushroom", "bhindi", "okra", "brinjal", "baingan", "eggplant", "lauki", "karela", "pumpkin", "kaddu", "lemon", "nimbu", "drumstick"
     ]
   },
@@ -183,15 +184,16 @@ function accountMatchesCategory(actualAccount, category) {
   if (category.aliases.some(alias => normAcc.includes(alias))) return true;
 
   // Cross-category allowances:
-  // e.g. Tissues/Napkins in both Cleaning and Packaging
-  if (category.id === "packaging" && (normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
-  if (category.id === "cleaning" && normAcc.includes("packag")) return true;
+  // e.g. Packing materials vs Packaging & Disposables (same category)
+  if (category.id === "packaging" && (normAcc.includes("pack") || normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
+  if (category.id === "cleaning" && (normAcc.includes("pack") || normAcc.includes("soap"))) return true;
 
-  // e.g. Kitchen utensils in hotelware or equipment or misc
-  if (category.id === "kitchen_tools" && (normAcc.includes("hotelware") || normAcc.includes("equipment") || normAcc.includes("kitchen"))) return true;
+  // e.g. Kitchen utensils in cutlery, crockery, hotelware, equipment or kitchen
+  if (category.id === "kitchen_tools" && (normAcc.includes("hotelware") || normAcc.includes("equipment") || normAcc.includes("kitchen") || normAcc.includes("crockery") || normAcc.includes("cutlery"))) return true;
 
-  // e.g. Vegetables & Fruits under Food / Groceries
-  if ((category.id === "vegetables" || category.id === "fruits") && (normAcc.includes("grocer") || normAcc.includes("food") || normAcc.includes("vegetable") || normAcc.includes("fruit"))) return true;
+  // e.g. Vegetables & Fruits under Food / Groceries / Combined accounts
+  if ((category.id === "vegetables" || category.id === "fruits") && (normAcc.includes("grocer") || normAcc.includes("food") || normAcc.includes("vegetable") || normAcc.includes("fruit") || normAcc.includes("tarkari"))) return true;
+  if (category.id === "groceries" && (normAcc.includes("food") || normAcc.includes("provision") || normAcc.includes("raw material"))) return true;
 
   return false;
 }
