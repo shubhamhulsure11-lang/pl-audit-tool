@@ -8,6 +8,217 @@ const n = (v) => typeof v === "number" ? v : Number(String(v ?? "").replace(/[,�
 const show = (v) => inr.format(v || 0);
 const col = (heads, choices) => choices.map(clean).map(x => heads.map(clean).indexOf(x)).find(x => x >= 0) ?? -1;
 
+// Restaurant-specific Account Head Taxonomy & Keyword Rules
+const RESTAURANT_TAXONOMY = [
+  {
+    id: "groceries",
+    label: "Groceries & Dry Goods",
+    aliases: ["grocer", "provision", "dry good", "food and grocery", "food & grocery", "raw material", "kitchen raw", "staple", "spices", "grain"],
+    keywords: [
+      "rice", "basmati", "kolam", "sona masoori", "wheat", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
+      "dal", "lentil", "toor", "tur dal", "moong", "mung", "urad", "chana", "kabuli", "rajma", "soya", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "crouton", "breadcrumbs",
+      "spices", "masala", "garam masala", "chaat masala", "biryani masala", "kitchen king", "turmeric", "haldi", "jeera", "cumin", "dhania", "coriander seed", "coriander powder", "mustard seed", "rai", "sarson", "fenugreek", "methi seed", "fennel", "saunf", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "nutmeg", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "kasuri methi", "red chilli", "kashmiri chilli", "degi mirch", "paprika", "chili flakes", "oregano", "thyme", "rosemary",
+      "oil", "refined oil", "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda",
+      "ghee", "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", // Rule: Ghee is Groceries
+      "sugar", "brown sugar", "jaggery", "gur", "honey", "salt", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg",
+      "sauce", "ketchup", "tomato ketchup", "chilli sauce", "soya sauce", "dark soy", "vinegar", "sriracha", "tabasco", "schezwan", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri", "pickle", "achaar", "murabba", "chutney", "papad", "appalam",
+      "tamarind", "imli", "desiccated coconut", "coconut dry",
+      "kaju", "cashew", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
+      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "food color"
+    ]
+  },
+  {
+    id: "dairy",
+    label: "Dairy",
+    aliases: ["dairy", "milk product"],
+    keywords: [
+      "milk", "toned milk", "full cream milk", "cow milk", "buffalo milk", "paneer", "cottage cheese", "curd", "dahi", "yogurt", "yoghurt", "hung curd", "fresh cream", "amul cream", "sour cream", "whipped cream", "butter", "salted butter", "unsalted butter", "table butter", "cheese", "mozzarella", "cheddar", "cheese slice", "cheese block", "parmesan", "feta", "gouda", "cream cheese", "khoya", "mawa", "buttermilk", "chaas", "lassi"
+    ]
+  },
+  {
+    id: "poultry_eggs",
+    label: "Eggs & Poultry",
+    aliases: ["poultry", "egg", "chicken"],
+    keywords: [
+      "egg", "eggs", "brown eggs", "white eggs", "quail egg", "chicken", "broiler", "country chicken", "desi chicken", "boneless chicken", "chicken breast", "chicken leg", "chicken drumstick", "chicken wings", "chicken keema", "chicken mince", "chicken curry cut", "whole chicken", "chicken lollipop", "chicken liver"
+    ]
+  },
+  {
+    id: "meat_seafood",
+    label: "Meat & Seafood",
+    aliases: ["meat", "mutton", "seafood", "fish", "pork", "beef", "lamb", "prawn", "crab"],
+    keywords: [
+      "mutton", "lamb", "goat meat", "mutton keema", "mutton chops", "beef", "pork", "bacon", "ham", "sausage", "pepperoni", "fish", "surmai", "kingfish", "pomfret", "rawas", "salmon", "rohu", "katla", "tilapia", "basa", "basa fillet", "tuna", "mackerel", "bangda", "hilsa", "prawns", "prawn", "shrimp", "tiger prawn", "jumbo prawn", "crab", "lobster", "squid", "calamari", "octopus", "clams", "oysters"
+    ]
+  },
+  {
+    id: "vegetables",
+    label: "Fresh Vegetables",
+    aliases: ["vegetable", "fresh veg", "veggie", "greens", "sabzi"],
+    keywords: [
+      "onion", "pyaz", "potato", "aloo", "tomato", "tamatar", "ginger", "adrak", "garlic", "lahsun", "green chilli", "hari mirch", "capsicum", "bell pepper", "shimla mirch", "carrot", "gajar", "beans", "green peas", "matar", "cabbage", "cauliflower", "gobhi", "broccoli", "spinach", "palak", "methi leaves", "coriander leaves", "fresh dhania", "mint leaves", "pudina", "curry leaves", "kadi patta", "lettuce", "iceberg", "cucumber", "kheera", "beetroot", "radish", "mooli", "spring onion", "leek", "celery", "zucchini", "mushroom", "button mushroom", "baby corn", "sweet corn", "bhindi", "lady finger", "okra", "brinjal", "baingan", "eggplant", "bottle gourd", "lauki", "bitter gourd", "karela", "pumpkin", "kaddu", "lemon fresh", "nimbu fresh", "raw banana", "drumstick"
+    ]
+  },
+  {
+    id: "fruits",
+    label: "Fresh Fruits",
+    aliases: ["fruit", "fresh fruit"],
+    keywords: [
+      "apple", "seb", "banana", "kela", "orange", "santra", "mosambi", "sweet lime", "pomegranate", "anar", "watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "pineapple", "ananas", "mango fresh", "aam", "grapes", "angoor", "strawberry", "kiwi", "guava", "amrood", "pear", "chikoo", "blueberry fresh", "dragonfruit", "plum", "peach", "cherry"
+    ]
+  },
+  {
+    id: "beverages",
+    label: "Beverages",
+    aliases: ["beverage", "drink", "bar purchase", "liquor", "soft drink", "mocktail", "cocktail"],
+    keywords: [
+      "cola", "coca cola", "coke", "diet coke", "pepsi", "7up", "sprite", "thums up", "limca", "fanta", "mirinda", "mountain dew",
+      "redbull", "red bull", "monster energy", "sting", "tonic water", "ginger ale", "gingerale", "club soda", "soda water", "lehar soda", "kinley soda",
+      "juice", "real juice", "real apple", "real mango", "real orange", "real cranberry", "real pineapple", "real litchi", "tropicana", "minute maid", "frooti", "maaza", "slice", "appy", "raw pressery", "paper boat",
+      "packaged water", "mineral water", "bisleri", "kinley", "aquafina", "vedica", "himalayan",
+      "syrup", "monin", "malas", "malass", "blue curacao", "grenadine", "mojito syrup", "peach syrup", "watermelon syrup", "crush", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush", "orange crush", "pineapple crush",
+      "beer", "kingfisher", "budweiser", "carlsberg", "bira", "corona", "heineken", "tuborg", "breezer",
+      "whisky", "whiskey", "scotch", "bourbon", "rum", "old monk", "bacardi", "vodka", "absolut", "smirnoff", "magic moments", "gin", "bombay sapphire", "tequila", "brandy", "wine", "sula", "champagne"
+    ]
+  },
+  {
+    id: "fuel_gas",
+    label: "Fuel & Gas",
+    aliases: ["fuel", "gas", "lpg", "cng", "diesel", "petrol"],
+    keywords: [
+      "lpg", "commercial cylinder", "lpg cylinder", "19kg cylinder", "bharat gas", "indane", "hp gas", "png", "diesel", "petrol", "kerosene", "firewood"
+    ]
+  },
+  {
+    id: "other_purchases",
+    label: "Other Purchases",
+    aliases: ["other purchase", "misc", "miscellaneous", "general purchase", "kitchen consumable", "other expense"],
+    keywords: [
+      "charcoal", "wood charcoal", "coal", // Rule: Charcoal is Other Purchases
+      "ice", "ice cube", "ice cubes", "ice slab", "crushed ice", "dry ice", // Rule: Ice is Other Purchases
+      "wooden skewers", "bamboo skewers", "skewers", "toothpick", "toothpicks", "birthday candle", "lighter", "matchbox"
+    ]
+  },
+  {
+    id: "packaging",
+    label: "Packaging & Disposables",
+    aliases: ["packag", "disposab", "takeaway", "parcel", "container"],
+    keywords: [
+      "container", "plastic container", "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box",
+      "paper bag", "carry bag", "kraft paper bag", "non woven bag", "d-cut bag", "zip lock", "polythene",
+      "paper plate", "disposable plate", "paper cup", "plastic glass", "disposable glass",
+      "tissue", "paper napkin", "cocktail napkin", "tissue roll", "kitchen roll", "toilet roll",
+      "aluminium foil", "silver foil", "cling wrap", "cling film", "butter paper", "parchment paper",
+      "paper straw", "plastic straw", "wooden spoon", "plastic spoon", "wooden fork", "plastic fork", "disposable cutlery", "chopstick"
+    ]
+  },
+  {
+    id: "cleaning",
+    label: "Cleaning & Housekeeping",
+    aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent"],
+    keywords: [
+      "dishwash", "dishwash bar", "dishwash liquid", "vim", "exo", "pril", "surf", "ariel", "tide", "rin", "detergent",
+      "floor cleaner", "lizol", "phenyl", "colin", "glass cleaner", "harpic", "toilet cleaner", "bathroom cleaner", "drain cleaner", "caustic soda",
+      "bleach", "bleaching powder", "disinfectant", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon", "liquid soap",
+      "broom", "jhadu", "mop", "floor wiper", "duster", "cleaning cloth", "microfiber cloth", "sponge", "scrubber", "scotch brite", "garbage bag", "trash bag", "dustbin cover", "dust pan", "rubber gloves", "room freshener", "odonil"
+    ]
+  },
+  {
+    id: "kitchen_tools",
+    label: "Kitchen & Bar Equipment",
+    aliases: ["utensil", "kitchen tool", "crockery", "cutlery", "equipment", "bar tool"],
+    keywords: [
+      "kadai", "fry pan", "sauce pan", "tawa", "cooker", "pressure cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "peeler", "grater", "chopping board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
+      "cocktail shaker", "bar strainer", "jigger", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
+    ]
+  },
+  {
+    id: "stationery",
+    label: "Stationery & Office",
+    aliases: ["station", "office supplies", "printing", "paper"],
+    keywords: [
+      "pen", "ball pen", "gel pen", "pencil", "marker", "permanent marker", "notebook", "register", "attendance register", "bill book", "kot book", "receipt book",
+      "stapler", "stapler pin", "punch machine", "brown tape", "cello tape", "scissor", "stamp pad", "rubber band", "binder clip", "file", "folder", "envelope", "a4 paper", "pos roll", "billing roll", "printer cartridge", "toner"
+    ]
+  }
+];
+
+// Helper to clean item string for token search
+function tokenizeItem(str) {
+  return String(str || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+// Check if actual account string matches category aliases
+function accountMatchesCategory(actualAccount, category) {
+  const normAcc = String(actualAccount || "").toLowerCase();
+  return category.aliases.some(alias => normAcc.includes(alias));
+}
+
+// Find expected category for an item description
+function classifyItem(itemName) {
+  const norm = tokenizeItem(itemName);
+  if (!norm) return null;
+
+  let bestMatch = null;
+  let maxKeywordLen = 0;
+
+  for (const cat of RESTAURANT_TAXONOMY) {
+    for (const kw of cat.keywords) {
+      const normKw = tokenizeItem(kw);
+      if (!normKw) continue;
+
+      // Check exact word or substring match
+      const regex = new RegExp(`(^|\\s)${normKw.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")}(\\s|$)`, "i");
+      const matched = regex.test(norm) || (normKw.length >= 4 && norm.includes(normKw));
+
+      if (matched && normKw.length > maxKeywordLen) {
+        maxKeywordLen = normKw.length;
+        bestMatch = { category: cat, keyword: kw };
+      }
+    }
+  }
+  return bestMatch;
+}
+
+// Auditor: Detect items booked under wrong account heads
+function detectMisclassifications(records) {
+  if (!records || !records.length) return [];
+  const map = new Map();
+
+  records.forEach(r => {
+    if (!r.item || !r.account || r.account === "Unassigned Account") return;
+    const match = classifyItem(r.item);
+    if (!match) return; // Unclassified items are not flagged
+
+    const expectedCat = match.category;
+    // Check if actual account head matches expected category
+    const isCorrect = accountMatchesCategory(r.account, expectedCat);
+
+    if (!isCorrect) {
+      const key = `${r.item}:::${r.vendor}:::${r.account}:::${expectedCat.id}`;
+      if (!map.has(key)) {
+        map.set(key, {
+          item: r.item,
+          vendor: r.vendor,
+          actualAccount: r.account,
+          suggestedAccount: expectedCat.label,
+          matchedKeyword: match.keyword,
+          confidence: "High",
+          count: 0,
+          total: 0,
+          rates: []
+        });
+      }
+      const entry = map.get(key);
+      entry.count += 1;
+      entry.total += r.total;
+      if (r.rate > 0) entry.rates.push(r.rate);
+    }
+  });
+
+  return [...map.values()].sort((a, b) => b.total - a.total);
+}
+
 async function readFile(file) {
   const data = await file.arrayBuffer();
   const wb = XLSX.read(data, { type: "array", cellDates: true });
@@ -69,7 +280,16 @@ function analyse(current, previous, thresholds) {
     const avg = rows.reduce((s, r) => s + r.total, 0) / rows.reduce((s, r) => s + r.qty, 0);
     rows.forEach(r => { if (r.rate > avg * priceMult) prices.push({ ...r, avg, pct: (r.rate - avg) / avg }); });
   });
-  return { duplicates, vendors: compare("vendor", vendorCut), items: compare("item", itemCut), prices: prices.sort((a, b) => b.pct - a.pct) };
+
+  const misclassifications = detectMisclassifications(current.records);
+
+  return {
+    duplicates,
+    vendors: compare("vendor", vendorCut),
+    items: compare("item", itemCut),
+    prices: prices.sort((a, b) => b.pct - a.pct),
+    misclassifications
+  };
 }
 
 function Upload({ title, file, onChange, help }) {
@@ -79,6 +299,83 @@ function Empty({ children }) { return <p className="empty">{children}</p>; }
 function Table({ head, children }) { return <div className="table"><table><thead><tr>{head.map(x => <th key={x}>{x}</th>)}</tr></thead><tbody>{children}</tbody></table></div>; }
 function ThresholdInput({ label, value, onChange, maxVal = 100 }) {
   return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="0" max={maxVal} value={value} onChange={e => onChange(Math.max(0, Math.min(maxVal, e.target.value === "" ? 0 : Number(e.target.value) || 0)))} /><span className="thresh-pct">%</span></div></label>;
+}
+
+function MisclassificationsView({ items, onGoToPivot }) {
+  const [q, setQ] = useState("");
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter(x =>
+      x.item.toLowerCase().includes(term) ||
+      x.vendor.toLowerCase().includes(term) ||
+      x.actualAccount.toLowerCase().includes(term) ||
+      x.suggestedAccount.toLowerCase().includes(term) ||
+      x.matchedKeyword.toLowerCase().includes(term)
+    );
+  }, [items, q]);
+
+  const totalExposure = useMemo(() => items.reduce((s, x) => s + x.total, 0), [items]);
+
+  return (
+    <section className="panel">
+      <div className="panelhead">
+        <div>
+          <p className="eyebrow">RESTAURANT TAXONOMY AUDIT</p>
+          <h2>Account Head Misclassifications</h2>
+        </div>
+        <div className="pivot-summary-badges">
+          <b className="badge">{items.length} Flagged Items</b>
+          <b className="badge accent-badge">{show(totalExposure)} Total Exposure</b>
+        </div>
+      </div>
+
+      <div className="misclass-info-banner">
+        <span>💡</span>
+        <div>
+          <strong>How this works:</strong> Items are matched against restaurant accounting rules (e.g., <em>Rice/Ghee &rarr; Groceries</em>, <em>Milk/Paneer &rarr; Dairy</em>, <em>Charcoal/Ice &rarr; Other Purchases</em>). Items placed in conflicting account heads are flagged below.
+        </div>
+      </div>
+
+      <div className="pivot-toolbar">
+        <div className="pivot-search-wrap">
+          <span>🔍</span>
+          <input
+            type="text"
+            className="pivot-search"
+            placeholder="Search flagged item, vendor, or account..."
+            value={q}
+            onChange={e => setQ(e.target.value)}
+          />
+          {q && <button className="pivot-clear-btn" onClick={() => setQ("")}>✕</button>}
+        </div>
+        {onGoToPivot && (
+          <button className="pivot-btn" onClick={onGoToPivot}>
+            View Account Pivot &rarr;
+          </button>
+        )}
+      </div>
+
+      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Matched Rule", "Amount Exposure"]}>
+        {filtered.length ? filtered.map((x, i) => (
+          <tr key={i}>
+            <td style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</td>
+            <td>{x.vendor}</td>
+            <td><span className="pill-actual-acc">{x.actualAccount}</span></td>
+            <td><span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span></td>
+            <td><span className="rule-tag">matched "{x.matchedKeyword}"</span></td>
+            <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)" }}>{show(x.total)}</td>
+          </tr>
+        )) : (
+          <tr>
+            <td colSpan="6">
+              <Empty>{items.length === 0 ? "🎉 No account head misclassifications detected! All items match their restaurant categories." : "No items match your search filter."}</Empty>
+            </td>
+          </tr>
+        )}
+      </Table>
+    </section>
+  );
 }
 
 function AccountPivot({ current }) {
@@ -326,7 +623,7 @@ export default function Home() {
   const result = useMemo(() => current && previous ? analyse(current, previous, thresholds) : null, [current, previous, thresholds]);
   const upload = async (file, setter) => { try { setError(""); setter(await readFile(file)); } catch (e) { setError(e.message); } };
   const spend = x => x?.records.reduce((s, r) => s + r.total, 0) || 0;
-  const total = result && (result.duplicates.length + result.vendors.length + result.items.length + result.prices.length);
+  const total = result && (result.duplicates.length + result.vendors.length + result.items.length + result.prices.length + result.misclassifications.length);
 
   return (
     <main>
@@ -342,8 +639,9 @@ export default function Home() {
         <section className="landing">
           <p className="eyebrow">ZOHO BOOKS PURCHASE & P&L REVIEW</p>
           <h2>Find what the spreadsheet misses.</h2>
-          <p className="lead">Compare two Zoho purchase exports to flag duplicate bills, vendor movements, item variation, price exceptions, and explore your Account Head hierarchy.</p>
+          <p className="lead">Compare two Zoho purchase exports to flag duplicate bills, account misclassifications, vendor movements, item variation, price exceptions, and explore your Account Head hierarchy.</p>
           <div className="chips">
+            <b>Misclassification alerts</b>
             <b>Account heads pivot</b>
             <b>Duplicate bills</b>
             <b>Vendor variation</b>
@@ -378,8 +676,13 @@ export default function Home() {
           </section>
 
           <nav>
-            {["Overview", "Account heads", "Duplicate bills", "Vendor variation", "Purchase variation", "Price exceptions"].map(x => (
-              <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>{x}</button>
+            {["Overview", "Misclassifications", "Account heads", "Duplicate bills", "Vendor variation", "Purchase variation", "Price exceptions"].map(x => (
+              <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>
+                {x}
+                {x === "Misclassifications" && result.misclassifications.length > 0 && (
+                  <span className="nav-badge-count">{result.misclassifications.length}</span>
+                )}
+              </button>
             ))}
           </nav>
 
@@ -397,15 +700,36 @@ export default function Home() {
                     <p className="eyebrow">PRIORITY QUEUE</p>
                     <h2>What to review first</h2>
                   </div>
-                  <b className="badge">{result.duplicates.length} duplicate patterns</b>
+                  <b className="badge">
+                    {result.misclassifications.length + result.duplicates.length} critical issues
+                  </b>
                 </div>
-                {result.duplicates.length || result.vendors.length || result.prices.length ? (
+                {result.misclassifications.length || result.duplicates.length || result.vendors.length || result.prices.length ? (
                   <div className="queue">
                     {[
-                      ...result.duplicates.slice(0, 3).map(x => ({ title: x.kind, detail: `${x.rows[0].vendor} - ${x.rows.length} matching lines`, value: x.total, red: x.risk === "Critical" })),
-                      ...result.vendors.slice(0, 3).map(x => ({ title: `${x.status} vendor`, detail: x.label, value: x.diff })),
-                      ...result.prices.slice(0, 2).map(x => ({ title: "High item price", detail: `${x.item} - ${x.vendor}`, value: x.total }))
-                    ].slice(0, 7).map((x, i) => (
+                      ...result.misclassifications.slice(0, 3).map(x => ({
+                        title: `Wrong Account: ${x.item}`,
+                        detail: `Booked in "${x.actualAccount}" → Should be "${x.suggestedAccount}"`,
+                        value: x.total,
+                        red: true
+                      })),
+                      ...result.duplicates.slice(0, 3).map(x => ({
+                        title: x.kind,
+                        detail: `${x.rows[0].vendor} - ${x.rows.length} matching lines`,
+                        value: x.total,
+                        red: x.risk === "Critical"
+                      })),
+                      ...result.vendors.slice(0, 2).map(x => ({
+                        title: `${x.status} vendor`,
+                        detail: x.label,
+                        value: x.diff
+                      })),
+                      ...result.prices.slice(0, 2).map(x => ({
+                        title: "High item price",
+                        detail: `${x.item} - ${x.vendor}`,
+                        value: x.total
+                      }))
+                    ].slice(0, 8).map((x, i) => (
                       <div className="queueitem" key={i}>
                         <i className={x.red ? "red" : "amber"} />
                         <div><strong>{x.title}</strong><small>{x.detail}</small></div>
@@ -418,6 +742,10 @@ export default function Home() {
                 )}
               </section>
             </>
+          )}
+
+          {tab === "Misclassifications" && (
+            <MisclassificationsView items={result.misclassifications} onGoToPivot={() => setTab("Account heads")} />
           )}
 
           {tab === "Account heads" && <AccountPivot current={current} />}
@@ -484,3 +812,4 @@ function Changes({ title, rows, field, threshold }) {
     </section>
   );
 }
+
