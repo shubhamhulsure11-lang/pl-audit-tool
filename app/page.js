@@ -11,19 +11,79 @@ const col = (heads, choices) => choices.map(clean).map(x => heads.map(clean).ind
 // Restaurant-specific Account Head Taxonomy & Keyword Rules
 const RESTAURANT_TAXONOMY = [
   {
-    id: "groceries",
-    label: "Groceries & Dry Goods",
-    aliases: ["grocer", "provision", "dry good", "food and grocery", "food & grocery", "raw material", "kitchen raw", "staple", "spices", "grain"],
+    id: "cigarettes",
+    label: "Cigarette purchases",
+    aliases: ["cigarette", "cigar", "tobacco", "smoke"],
     keywords: [
-      "rice", "basmati", "kolam", "sona masoori", "wheat", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
-      "dal", "lentil", "toor", "tur dal", "moong", "mung", "urad", "chana", "kabuli", "rajma", "soya", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "crouton", "breadcrumbs",
-      "spices", "masala", "garam masala", "chaat masala", "biryani masala", "kitchen king", "turmeric", "haldi", "jeera", "cumin", "dhania", "coriander seed", "coriander powder", "mustard seed", "rai", "sarson", "fenugreek", "methi seed", "fennel", "saunf", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "nutmeg", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "kasuri methi", "red chilli", "kashmiri chilli", "degi mirch", "paprika", "chili flakes", "oregano", "thyme", "rosemary",
-      "oil", "refined oil", "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda",
-      "ghee", "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", // Rule: Ghee is Groceries
-      "sugar", "brown sugar", "jaggery", "gur", "honey", "salt", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg",
-      "sauce", "ketchup", "tomato ketchup", "chilli sauce", "soya sauce", "dark soy", "vinegar", "sriracha", "tabasco", "schezwan", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri", "pickle", "achaar", "murabba", "chutney", "papad", "appalam",
-      "tamarind", "imli", "desiccated coconut", "coconut dry",
-      "kaju", "cashew", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
+      "classic connect", "cl ice burst", "ice burst", "classic bt", "classic", "marlboro", "gold flake", "wills", "benson", "lights", "king size", "switch", "capsule", "advance", "total", "esse", "dunhill", "cigarette", "cigarettes", "cigar"
+    ]
+  },
+  {
+    id: "liquor",
+    label: "Liquor Purchases",
+    aliases: ["liquor", "alcohol", "spirit", "wine", "beer", "whisky", "whiskey", "bar purchase", "excise"],
+    keywords: [
+      "jacobs creek", "shiraz", "cabernet", "chardonnay", "merlot", "sauvignon", "pinot noir", "wine", "red wine", "white wine",
+      "whisky", "whiskey", "scotch", "bourbon", "single malt", "glenfiddich", "black label", "red label", "double black", "chivas", "jack daniels", "jameson", "ballantines", "teachers", "100 pipers", "vat 69", "antiquity", "blenders pride", "royal challenge", "signature", "royal stag", "imperial blue", "oakton",
+      "vodka", "absolut", "smirnoff", "magic moments", "grey goose", "ciroc", "belvedere",
+      "rum", "old monk", "bacardi", "captain morgan",
+      "gin", "bombay sapphire", "beefeater", "tanqueray", "gordons", "greater than", "stranger & sons", "hendricks", "gin & tonic",
+      "tequila", "jose cuervo", "patron", "don julio", "camino", "sauza",
+      "brandy", "mansion house", "cognac", "hennessy",
+      "champagne", "prosecco", "sparkling wine", "sula", "fratelli", "grover", "chandon", "jacob creek",
+      "beer", "kingfisher", "budweiser", "corona", "bira", "heineken", "carlsberg", "tuborg", "hoegaarden", "stella artois", "miller", "breezer", "craft beer", "draught beer",
+      "baileys", "jagermeister", "kahlua", "cointreau", "campari", "aperol", "sambuca", "liqueur"
+    ]
+  },
+  {
+    id: "seafood",
+    label: "Sea food purchases",
+    aliases: ["sea food", "seafood", "fish", "prawn", "crab", "marine"],
+    keywords: [
+      "16/20 prawns", "tiger prawn", "tiger prawns", "jumbo prawn", "jumbo prawns", "v. basa", "v basa", "basa fillet", "basa",
+      "prawns", "prawn", "shrimp", "shrimps", "surmai", "kingfish", "pomfret", "white pomfret", "black pomfret", "rawas", "indian salmon", "salmon", "rohu", "katla", "tilapia", "tuna", "mackerel", "bangda", "hilsa", "bombil", "bombay duck", "squid", "calamari", "octopus", "crab", "mud crab", "lobster", "clams", "oysters", "fish"
+    ]
+  },
+  {
+    id: "poultry",
+    label: "Poultry",
+    aliases: ["poultry", "chicken", "mutton", "meat", "egg", "nonveg", "non-veg"],
+    keywords: [
+      "chicken breast", "chicken leg", "chicken drumstick", "chicken wings", "chicken keema", "chicken mince", "chicken curry cut", "chicken lollipop", "chicken liver", "boneless chicken", "broiler chicken", "country chicken", "desi chicken", "whole chicken", "tandoori chicken", "chicken",
+      "mutton keema", "mutton curry cut", "mutton chops", "mutton boti", "mutton brain", "lamb chops", "lamb shank", "goat meat", "mutton", "lamb",
+      "brown eggs", "white eggs", "quail eggs", "egg tray", "eggs", "egg",
+      "beef", "pork", "bacon", "ham", "sausage", "pepperoni"
+    ]
+  },
+  {
+    id: "beverages",
+    label: "Beverages",
+    aliases: ["beverage", "soft drink", "drinks", "cold drink", "non alcoholic"],
+    keywords: [
+      "real apple", "real mango", "real orange", "real cranberry", "real pineapple", "real litchi", "real juice", "real",
+      "redbull", "red bull", "monster energy", "sting", "ocean fruit water",
+      "tonic water", "ginger ale", "gingerale", "club soda", "soda water", "lehar soda", "kinley soda", "soda",
+      "diet coke", "coke zero", "coca cola", "coke", "pepsi", "diet pepsi", "7up", "sprite", "thums up", "limca", "fanta", "mirinda", "mountain dew",
+      "tropicana", "minute maid", "frooti", "maaza", "slice", "appy fizz", "appy", "raw pressery", "paper boat", "juice",
+      "bisleri", "kinley water", "aquafina", "vedica", "himalayan water", "packaged water", "mineral water",
+      "blue curacao", "grenadine", "mojito syrup", "peach syrup", "watermelon syrup", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush", "orange crush", "pineapple crush", "monin", "malas", "malass", "crush", "syrup", "fruit syrup"
+    ]
+  },
+  {
+    id: "groceries",
+    label: "Groceries",
+    aliases: ["grocer", "food and grocery", "food & grocery", "provision", "dry good", "raw material", "staple", "spices", "grain"],
+    keywords: [
+      "sona masoori", "basmati rice", "kolam rice", "rice", "basmati", "kolam", "wheat", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
+      "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal", "kabuli chana", "rajma", "soya chunks", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "breadcrumbs", "dal", "lentil", "lentils",
+      "garam masala", "chaat masala", "biryani masala", "kitchen king", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "coriander seed", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "red chilli", "kashmiri chilli", "degi mirch", "chili flakes",
+      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
+      "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil", "oil",
+      "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee", // Rule: Ghee is Groceries
+      "brown sugar", "jaggery", "gur", "honey", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg", "sugar", "salt",
+      "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "vinegar", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri", "ketchup", "sauce",
+      "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut",
+      "cashew", "kaju", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
       "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "food color"
     ]
   },
@@ -32,71 +92,39 @@ const RESTAURANT_TAXONOMY = [
     label: "Dairy",
     aliases: ["dairy", "milk product"],
     keywords: [
-      "milk", "toned milk", "full cream milk", "cow milk", "buffalo milk", "paneer", "cottage cheese", "curd", "dahi", "yogurt", "yoghurt", "hung curd", "fresh cream", "amul cream", "sour cream", "whipped cream", "butter", "salted butter", "unsalted butter", "table butter", "cheese", "mozzarella", "cheddar", "cheese slice", "cheese block", "parmesan", "feta", "gouda", "cream cheese", "khoya", "mawa", "buttermilk", "chaas", "lassi"
-    ]
-  },
-  {
-    id: "poultry_eggs",
-    label: "Eggs & Poultry",
-    aliases: ["poultry", "egg", "chicken"],
-    keywords: [
-      "egg", "eggs", "brown eggs", "white eggs", "quail egg", "chicken", "broiler", "country chicken", "desi chicken", "boneless chicken", "chicken breast", "chicken leg", "chicken drumstick", "chicken wings", "chicken keema", "chicken mince", "chicken curry cut", "whole chicken", "chicken lollipop", "chicken liver"
-    ]
-  },
-  {
-    id: "meat_seafood",
-    label: "Meat & Seafood",
-    aliases: ["meat", "mutton", "seafood", "fish", "pork", "beef", "lamb", "prawn", "crab"],
-    keywords: [
-      "mutton", "lamb", "goat meat", "mutton keema", "mutton chops", "beef", "pork", "bacon", "ham", "sausage", "pepperoni", "fish", "surmai", "kingfish", "pomfret", "rawas", "salmon", "rohu", "katla", "tilapia", "basa", "basa fillet", "tuna", "mackerel", "bangda", "hilsa", "prawns", "prawn", "shrimp", "tiger prawn", "jumbo prawn", "crab", "lobster", "squid", "calamari", "octopus", "clams", "oysters"
-    ]
-  },
-  {
-    id: "vegetables",
-    label: "Fresh Vegetables",
-    aliases: ["vegetable", "fresh veg", "veggie", "greens", "sabzi"],
-    keywords: [
-      "onion", "pyaz", "potato", "aloo", "tomato", "tamatar", "ginger", "adrak", "garlic", "lahsun", "green chilli", "hari mirch", "capsicum", "bell pepper", "shimla mirch", "carrot", "gajar", "beans", "green peas", "matar", "cabbage", "cauliflower", "gobhi", "broccoli", "spinach", "palak", "methi leaves", "coriander leaves", "fresh dhania", "mint leaves", "pudina", "curry leaves", "kadi patta", "lettuce", "iceberg", "cucumber", "kheera", "beetroot", "radish", "mooli", "spring onion", "leek", "celery", "zucchini", "mushroom", "button mushroom", "baby corn", "sweet corn", "bhindi", "lady finger", "okra", "brinjal", "baingan", "eggplant", "bottle gourd", "lauki", "bitter gourd", "karela", "pumpkin", "kaddu", "lemon fresh", "nimbu fresh", "raw banana", "drumstick"
-    ]
-  },
-  {
-    id: "fruits",
-    label: "Fresh Fruits",
-    aliases: ["fruit", "fresh fruit"],
-    keywords: [
-      "apple", "seb", "banana", "kela", "orange", "santra", "mosambi", "sweet lime", "pomegranate", "anar", "watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "pineapple", "ananas", "mango fresh", "aam", "grapes", "angoor", "strawberry", "kiwi", "guava", "amrood", "pear", "chikoo", "blueberry fresh", "dragonfruit", "plum", "peach", "cherry"
-    ]
-  },
-  {
-    id: "beverages",
-    label: "Beverages",
-    aliases: ["beverage", "drink", "bar purchase", "liquor", "soft drink", "mocktail", "cocktail"],
-    keywords: [
-      "cola", "coca cola", "coke", "diet coke", "pepsi", "7up", "sprite", "thums up", "limca", "fanta", "mirinda", "mountain dew",
-      "redbull", "red bull", "monster energy", "sting", "tonic water", "ginger ale", "gingerale", "club soda", "soda water", "lehar soda", "kinley soda",
-      "juice", "real juice", "real apple", "real mango", "real orange", "real cranberry", "real pineapple", "real litchi", "tropicana", "minute maid", "frooti", "maaza", "slice", "appy", "raw pressery", "paper boat",
-      "packaged water", "mineral water", "bisleri", "kinley", "aquafina", "vedica", "himalayan",
-      "syrup", "monin", "malas", "malass", "blue curacao", "grenadine", "mojito syrup", "peach syrup", "watermelon syrup", "crush", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush", "orange crush", "pineapple crush",
-      "beer", "kingfisher", "budweiser", "carlsberg", "bira", "corona", "heineken", "tuborg", "breezer",
-      "whisky", "whiskey", "scotch", "bourbon", "rum", "old monk", "bacardi", "vodka", "absolut", "smirnoff", "magic moments", "gin", "bombay sapphire", "tequila", "brandy", "wine", "sula", "champagne"
-    ]
-  },
-  {
-    id: "fuel_gas",
-    label: "Fuel & Gas",
-    aliases: ["fuel", "gas", "lpg", "cng", "diesel", "petrol"],
-    keywords: [
-      "lpg", "commercial cylinder", "lpg cylinder", "19kg cylinder", "bharat gas", "indane", "hp gas", "png", "diesel", "petrol", "kerosene", "firewood"
+      "toned milk", "full cream milk", "cow milk", "buffalo milk", "cottage cheese", "hung curd", "fresh cream", "amul cream", "sour cream", "whipped cream", "salted butter", "unsalted butter", "table butter", "mozzarella", "cheddar cheese", "cheese slice", "cheese block", "cream cheese",
+      "milk", "paneer", "curd", "dahi", "yogurt", "yoghurt", "cream", "butter", "cheese", "khoya", "mawa", "buttermilk", "chaas", "lassi"
     ]
   },
   {
     id: "other_purchases",
     label: "Other Purchases",
-    aliases: ["other purchase", "misc", "miscellaneous", "general purchase", "kitchen consumable", "other expense"],
+    aliases: ["other purchase", "other purchases", "misc", "miscellaneous", "general purchase", "kitchen consumable", "other expense"],
     keywords: [
-      "charcoal", "wood charcoal", "coal", // Rule: Charcoal is Other Purchases
-      "ice", "ice cube", "ice cubes", "ice slab", "crushed ice", "dry ice", // Rule: Ice is Other Purchases
-      "wooden skewers", "bamboo skewers", "skewers", "toothpick", "toothpicks", "birthday candle", "lighter", "matchbox"
+      "wood charcoal", "charcoal", "coal", // Rule: Charcoal is Other Purchases
+      "ice slab", "ice slabs", "ice cube", "ice cubes", "crushed ice", "dry ice", "ice", // Rule: Ice is Other Purchases
+      "wooden skewers", "bamboo skewers", "skewers", "toothpick", "toothpicks", "birthday candles", "candle", "lighter", "matchbox"
+    ]
+  },
+  {
+    id: "kitchen_tools",
+    label: "Kitchen tools",
+    aliases: ["kitchen tool", "kitchen tools", "utensil", "utensils", "crockery", "cutlery", "hotelware", "equipment", "bar tool"],
+    keywords: [
+      "dal katori", "vertigo cream", "katori", "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
+      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware",
+      "cocktail shaker", "bar strainer", "jigger", "peg measurer", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
+    ]
+  },
+  {
+    id: "cleaning",
+    label: "Cleaning and housekeeping",
+    aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent"],
+    keywords: [
+      "dishwash bar", "dishwash liquid", "dishwash", "vim bar", "vim liquid", "vim", "exo", "pril", "surf excel", "surf", "ariel", "tide", "rin", "detergent powder", "liquid detergent", "detergent",
+      "floor cleaner", "lizol", "phenyl", "white phenyl", "colin", "glass cleaner", "harpic", "toilet cleaner", "bathroom cleaner", "drain cleaner", "caustic soda",
+      "bleaching powder", "bleach", "disinfectant", "hand sanitizer", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon", "liquid soap",
+      "phool jhadu", "coconut broom", "broom", "jhadu", "mop", "floor wiper", "wiper", "duster", "cleaning cloth", "microfiber cloth", "sponge", "steel scrubber", "green scrubber", "scrubber", "scotch brite", "garbage bag", "trash bag", "dustbin cover", "dust pan", "rubber gloves", "room freshener", "odonil"
     ]
   },
   {
@@ -104,32 +132,30 @@ const RESTAURANT_TAXONOMY = [
     label: "Packaging & Disposables",
     aliases: ["packag", "disposab", "takeaway", "parcel", "container"],
     keywords: [
-      "container", "plastic container", "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box",
-      "paper bag", "carry bag", "kraft paper bag", "non woven bag", "d-cut bag", "zip lock", "polythene",
+      "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box", "plastic container", "container",
+      "kraft paper bag", "non woven bag", "d-cut bag", "paper bag", "carry bag", "zip lock", "polythene",
       "paper plate", "disposable plate", "paper cup", "plastic glass", "disposable glass",
-      "tissue", "paper napkin", "cocktail napkin", "tissue roll", "kitchen roll", "toilet roll",
+      "paper napkin", "cocktail napkin", "tissue paper", "tissue roll", "kitchen roll", "toilet roll", "tissue", "napkin",
       "aluminium foil", "silver foil", "cling wrap", "cling film", "butter paper", "parchment paper",
-      "paper straw", "plastic straw", "wooden spoon", "plastic spoon", "wooden fork", "plastic fork", "disposable cutlery", "chopstick"
+      "paper straw", "plastic straw", "straw", "wooden spoon", "plastic spoon", "wooden fork", "plastic fork", "disposable cutlery", "chopstick", "chopsticks"
     ]
   },
   {
-    id: "cleaning",
-    label: "Cleaning & Housekeeping",
-    aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent"],
+    id: "vegetables",
+    label: "Fresh Vegetables",
+    aliases: ["vegetable", "fresh veg", "veggie", "greens", "sabzi"],
     keywords: [
-      "dishwash", "dishwash bar", "dishwash liquid", "vim", "exo", "pril", "surf", "ariel", "tide", "rin", "detergent",
-      "floor cleaner", "lizol", "phenyl", "colin", "glass cleaner", "harpic", "toilet cleaner", "bathroom cleaner", "drain cleaner", "caustic soda",
-      "bleach", "bleaching powder", "disinfectant", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon", "liquid soap",
-      "broom", "jhadu", "mop", "floor wiper", "duster", "cleaning cloth", "microfiber cloth", "sponge", "scrubber", "scotch brite", "garbage bag", "trash bag", "dustbin cover", "dust pan", "rubber gloves", "room freshener", "odonil"
+      "green chilli", "hari mirch", "bell pepper", "shimla mirch", "capsicum", "green peas", "matar", "coriander leaves", "fresh dhania", "mint leaves", "pudina", "curry leaves", "kadi patta", "spring onion", "button mushroom", "baby corn", "sweet corn", "lady finger", "bottle gourd", "bitter gourd", "raw banana",
+      "onion", "pyaz", "potato", "aloo", "tomato", "tamatar", "ginger", "adrak", "garlic", "lahsun", "carrot", "gajar", "beans", "cabbage", "cauliflower", "broccoli", "spinach", "palak", "methi", "lettuce", "iceberg", "cucumber", "kheera", "beetroot", "radish", "mooli", "leek", "celery", "zucchini", "mushroom", "bhindi", "okra", "brinjal", "baingan", "eggplant", "lauki", "karela", "pumpkin", "kaddu", "lemon", "nimbu", "drumstick"
     ]
   },
   {
-    id: "kitchen_tools",
-    label: "Kitchen & Bar Equipment",
-    aliases: ["utensil", "kitchen tool", "crockery", "cutlery", "equipment", "bar tool"],
+    id: "fruits",
+    label: "Fresh Fruits",
+    aliases: ["fruit", "fresh fruit"],
     keywords: [
-      "kadai", "fry pan", "sauce pan", "tawa", "cooker", "pressure cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "peeler", "grater", "chopping board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
-      "cocktail shaker", "bar strainer", "jigger", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
+      "sweet lime", "fresh mango", "blueberry fresh",
+      "apple", "seb", "banana", "kela", "orange", "santra", "mosambi", "pomegranate", "anar", "watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "pineapple", "ananas", "mango", "aam", "grapes", "angoor", "strawberry", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
     ]
   },
   {
@@ -137,26 +163,41 @@ const RESTAURANT_TAXONOMY = [
     label: "Stationery & Office",
     aliases: ["station", "office supplies", "printing", "paper"],
     keywords: [
-      "pen", "ball pen", "gel pen", "pencil", "marker", "permanent marker", "notebook", "register", "attendance register", "bill book", "kot book", "receipt book",
-      "stapler", "stapler pin", "punch machine", "brown tape", "cello tape", "scissor", "stamp pad", "rubber band", "binder clip", "file", "folder", "envelope", "a4 paper", "pos roll", "billing roll", "printer cartridge", "toner"
+      "attendance register", "bill book", "kot book", "receipt book", "permanent marker", "ball pen", "gel pen", "pos roll", "billing roll", "printer cartridge",
+      "register", "notebook", "pen", "pencil", "marker", "stapler", "stapler pin", "punch machine", "brown tape", "cello tape", "tape", "scissor", "scissors", "stamp pad", "rubber band", "binder clip", "file", "folder", "envelope", "a4 paper", "toner"
     ]
   }
 ];
 
-// Helper to clean item string for token search
-function tokenizeItem(str) {
+// Helper to clean item string into lowercase words
+function cleanWords(str) {
   return String(str || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-// Check if actual account string matches category aliases
+// Check if actual account string matches category aliases or related categories
 function accountMatchesCategory(actualAccount, category) {
   const normAcc = String(actualAccount || "").toLowerCase();
-  return category.aliases.some(alias => normAcc.includes(alias));
+  
+  // Direct alias match
+  if (category.aliases.some(alias => normAcc.includes(alias))) return true;
+
+  // Cross-category allowances:
+  // e.g. Tissues/Napkins in both Cleaning and Packaging
+  if (category.id === "packaging" && (normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
+  if (category.id === "cleaning" && normAcc.includes("packag")) return true;
+
+  // e.g. Kitchen utensils in hotelware or equipment or misc
+  if (category.id === "kitchen_tools" && (normAcc.includes("hotelware") || normAcc.includes("equipment") || normAcc.includes("kitchen"))) return true;
+
+  // e.g. Vegetables & Fruits under Food / Groceries
+  if ((category.id === "vegetables" || category.id === "fruits") && (normAcc.includes("grocer") || normAcc.includes("food") || normAcc.includes("vegetable") || normAcc.includes("fruit"))) return true;
+
+  return false;
 }
 
-// Find expected category for an item description
+// Find expected category for an item description using strict word-boundary matching
 function classifyItem(itemName) {
-  const norm = tokenizeItem(itemName);
+  const norm = cleanWords(itemName);
   if (!norm) return null;
 
   let bestMatch = null;
@@ -164,16 +205,19 @@ function classifyItem(itemName) {
 
   for (const cat of RESTAURANT_TAXONOMY) {
     for (const kw of cat.keywords) {
-      const normKw = tokenizeItem(kw);
+      const normKw = cleanWords(kw);
       if (!normKw) continue;
 
-      // Check exact word or substring match
-      const regex = new RegExp(`(^|\\s)${normKw.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&")}(\\s|$)`, "i");
-      const matched = regex.test(norm) || (normKw.length >= 4 && norm.includes(normKw));
+      // Strict matching: keyword must match as complete whole words
+      // e.g. "classic" will match "classic connect" as a word, but "lassi" will NEVER match "classic"
+      const escaped = normKw.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+      const wordRegex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i");
 
-      if (matched && normKw.length > maxKeywordLen) {
-        maxKeywordLen = normKw.length;
-        bestMatch = { category: cat, keyword: kw };
+      if (wordRegex.test(norm)) {
+        if (normKw.length > maxKeywordLen) {
+          maxKeywordLen = normKw.length;
+          bestMatch = { category: cat, keyword: kw };
+        }
       }
     }
   }
@@ -183,6 +227,14 @@ function classifyItem(itemName) {
 // Auditor: Detect items booked under wrong account heads
 function detectMisclassifications(records) {
   if (!records || !records.length) return [];
+  
+  // Find all distinct account names in this sheet to suggest the exact sheet account name when possible
+  const sheetAccounts = [...new Set(records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))];
+  const findBestSheetAccountName = (category) => {
+    const matched = sheetAccounts.find(acc => category.aliases.some(alias => acc.toLowerCase().includes(alias)));
+    return matched || category.label;
+  };
+
   const map = new Map();
 
   records.forEach(r => {
@@ -195,13 +247,14 @@ function detectMisclassifications(records) {
     const isCorrect = accountMatchesCategory(r.account, expectedCat);
 
     if (!isCorrect) {
+      const suggestedName = findBestSheetAccountName(expectedCat);
       const key = `${r.item}:::${r.vendor}:::${r.account}:::${expectedCat.id}`;
       if (!map.has(key)) {
         map.set(key, {
           item: r.item,
           vendor: r.vendor,
           actualAccount: r.account,
-          suggestedAccount: expectedCat.label,
+          suggestedAccount: suggestedName,
           matchedKeyword: match.keyword,
           confidence: "High",
           count: 0,
