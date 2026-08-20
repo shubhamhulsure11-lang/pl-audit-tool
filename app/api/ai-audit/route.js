@@ -52,28 +52,58 @@ Format: [{"item":"...","vendor":"...","actualAccount":"...","suggestedAccount":"
         "Content-Type": "application/json",
         Authorization: `Bearer ${apiKey}`
       },
-      body: JSON.stringify({
-        model: "llama-3.3-70b-versatile",
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage }
-        ],
-        temperature: 0.1,
-        max_tokens: 4096
-      })
-    });
+    // Try all free Groq models in order of quality until one works
+    const groqModels = [
+      "llama-3.3-70b-versatile",
+      "llama3-70b-8192",
+      "llama-3.1-70b-versatile",
+      "llama-3.1-8b-instant",
+      "llama3-8b-8192",
+      "mixtral-8x7b-32768",
+      "gemma2-9b-it",
+      "gemma-7b-it"
+    ];
 
-    if (!groqRes.ok) {
+    let groqData = null;
+    let lastError = "";
+
+    for (const model of groqModels) {
+      const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userMessage }
+          ],
+          temperature: 0.1,
+          max_tokens: 4096
+        })
+      });
+
+      if (groqRes.ok) {
+        groqData = await groqRes.json();
+        break;
+      }
+
       const errText = await groqRes.text();
-      let errMsg = `Groq API error (${groqRes.status})`;
       try {
         const parsed = JSON.parse(errText);
-        errMsg = parsed?.error?.message || errMsg;
-      } catch { /* ignore */ }
-      return NextResponse.json({ error: errMsg }, { status: groqRes.status });
+        lastError = parsed?.error?.message || `HTTP ${groqRes.status}`;
+      } catch { lastError = `HTTP ${groqRes.status}`; }
+
+      // Only continue loop for model-not-found errors, not auth errors
+      if (groqRes.status === 401 || groqRes.status === 403) break;
     }
 
-    const groqData = await groqRes.json();
+    if (!groqData) {
+      return NextResponse.json({ error: lastError || "No Groq model available for your account." }, { status: 400 });
+    }
+
     const text = groqData.choices?.[0]?.message?.content?.trim() || "";
 
     let jsonStr = text;
