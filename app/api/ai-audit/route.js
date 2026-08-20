@@ -1,38 +1,48 @@
 import { NextResponse } from "next/server";
 
-// Standard production Groq models (in preference order)
-const ALLOWED_STANDARD_MODELS = [
-  "llama-3.3-70b-versatile",
+// Preferred model order — all verified standard Groq models
+const MODEL_PREFERENCES = [
   "llama-3.1-8b-instant",
-  "llama3-70b-8192",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-70b-versatile",
   "llama3-8b-8192",
+  "llama3-70b-8192",
   "mixtral-8x7b-32768",
-  "gemma2-9b-it"
+  "gemma2-9b-it",
+  "gemma-7b-it",
+];
+
+// Keywords that identify non-chat/unusable models
+const EXCLUDE_PATTERNS = [
+  "whisper", "tts", "distil", "embed", "vision",
+  "playai", "playht", "guard", "canopylabs", "orpheus",
+  "arabic", "preview", "speculative",
 ];
 
 async function pickBestGroqModel(apiKey) {
-  try {
-    const res = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { Authorization: `Bearer ${apiKey}` }
+  const listRes = await fetch("https://api.groq.com/openai/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  if (!listRes.ok) throw new Error(`Groq /models error (${listRes.status})`);
+
+  const listData = await listRes.json();
+  const available = (listData.data || [])
+    .map(m => m.id)
+    .filter(id => {
+      const lower = id.toLowerCase();
+      return !EXCLUDE_PATTERNS.some(pat => lower.includes(pat));
     });
-    if (!res.ok) return "llama-3.3-70b-versatile";
-    const data = await res.json();
-    const availableIds = new Set((data.data || []).map((m) => m.id.toLowerCase()));
 
-    for (const model of ALLOWED_STANDARD_MODELS) {
-      if (availableIds.has(model.toLowerCase())) return model;
-    }
+  if (available.length === 0) throw new Error("No usable Groq chat model found on your account.");
 
-    const safeFallback = (data.data || [])
-      .map(m => m.id)
-      .find(id => {
-        const lower = id.toLowerCase();
-        return (lower.startsWith("llama") || lower.startsWith("gemma") || lower.startsWith("mixtral")) && !lower.includes("guard");
-      });
-    return safeFallback || "llama-3.3-70b-versatile";
-  } catch {
-    return "llama-3.3-70b-versatile";
+  // Pick from preference list first
+  for (const pref of MODEL_PREFERENCES) {
+    const match = available.find(id => id.toLowerCase() === pref.toLowerCase());
+    if (match) return match;
   }
+
+  // Fallback: first available safe model (prefer llama, then anything else)
+  return available.find(id => id.toLowerCase().startsWith("llama")) || available[0];
 }
 
 export async function POST(req) {
@@ -45,7 +55,13 @@ export async function POST(req) {
       return NextResponse.json({ error: "No Groq API key provided." }, { status: 400 });
     }
 
-    const model = await pickBestGroqModel(apiKey);
+    let model;
+    try {
+      model = await pickBestGroqModel(apiKey);
+    } catch (e) {
+      return NextResponse.json({ error: `Model selection failed: ${e.message}` }, { status: 400 });
+    }
+
     const accounts = availableAccounts.join(", ");
 
     // ─── SINGLE ITEM MODE ──────────────────────────────────────────────────────
@@ -59,9 +75,9 @@ Current Account Head in Zoho: "${actualAccount}"
 Available Account Heads: ${accounts}
 
 Rules:
-- Groceries / Food Raw Materials: rice, dal, atta, spices, masala, ghee, cooking oil, sugar, sauces, vinegar, vanilla essence, knorr, chicken broth powder, seasonings, broth cubes, olives, dry fruits
+- Groceries / Food Raw Materials: rice, dal, atta, spices, masala, ghee, cooking oil, sugar, sauces, vinegar, vanilla essence, knorr, chicken broth powder, bouillon, seasonings
 - Dairy: milk, paneer, curd, butter, cream, cheese, khoya, buttermilk (NOT ghee)
-- Poultry: fresh raw chicken, mutton, lamb, eggs, goat meat (processed broth/powders are Groceries)
+- Poultry: raw fresh chicken, mutton, lamb, eggs, goat meat (processed broth/powders are Groceries)
 - Sea food: fish (basa, surmai, pomfret, rawas, salmon, tuna), prawns, shrimp, crab, lobster, squid
 - Beverages (NON-ALCOHOLIC): red bull, tonic water, soda, juices, monin syrups, malas, mineral water, tea, coffee
 - Liquor Purchases (ALCOHOLIC ONLY): wine, beer, whisky, vodka, rum, gin, tequila, brandy, champagne
@@ -117,9 +133,9 @@ Return ONLY valid JSON. No markdown, no extra text.`;
     const itemsToAudit = items.slice(0, 10).map(({ item, vendor, actualAccount }) => ({ item, vendor, actualAccount }));
 
     const RULES = `Rules:
-1.Groceries: rice, dal, atta, spices, masala, cooking oil, sugar, sauces, vinegar, ghee, vanilla, knorr broth, seasoning
+1.Groceries: rice, dal, atta, spices, masala, cooking oil, sugar, sauces, vinegar, ghee, vanilla, knorr broth, seasoning powder
 2.Dairy: milk, paneer, curd, butter, cream, cheese, khoya, buttermilk
-3.Poultry: fresh chicken, mutton, lamb, eggs
+3.Poultry: fresh raw chicken, mutton, lamb, eggs
 4.Sea food: basa, surmai, pomfret, rawas, salmon, prawns, shrimp, crab, lobster, squid
 5.Beverages(NON-ALCOHOLIC): red bull, tonic, soda, juices, monin, malas, mineral water, tea, coffee
 6.Liquor Purchases(ALCOHOLIC only): wine, beer, whisky, vodka, rum, gin, tequila, brandy, champagne

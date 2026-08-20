@@ -1,38 +1,48 @@
 import { NextResponse } from "next/server";
 
-// Standard production Groq models (in preference order)
-const ALLOWED_STANDARD_MODELS = [
-  "llama-3.3-70b-versatile",
+// Preferred model order — all verified standard Groq models
+const MODEL_PREFERENCES = [
   "llama-3.1-8b-instant",
-  "llama3-70b-8192",
+  "llama-3.3-70b-versatile",
+  "llama-3.1-70b-versatile",
   "llama3-8b-8192",
+  "llama3-70b-8192",
   "mixtral-8x7b-32768",
-  "gemma2-9b-it"
+  "gemma2-9b-it",
+  "gemma-7b-it",
+];
+
+// Keywords that identify non-chat/unusable models
+const EXCLUDE_PATTERNS = [
+  "whisper", "tts", "distil", "embed", "vision",
+  "playai", "playht", "guard", "canopylabs", "orpheus",
+  "arabic", "preview", "speculative",
 ];
 
 async function pickBestGroqModel(apiKey) {
-  try {
-    const res = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { Authorization: `Bearer ${apiKey}` }
+  const listRes = await fetch("https://api.groq.com/openai/v1/models", {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  if (!listRes.ok) throw new Error(`Groq /models error (${listRes.status})`);
+
+  const listData = await listRes.json();
+  const available = (listData.data || [])
+    .map(m => m.id)
+    .filter(id => {
+      const lower = id.toLowerCase();
+      return !EXCLUDE_PATTERNS.some(pat => lower.includes(pat));
     });
-    if (!res.ok) return "llama-3.3-70b-versatile";
-    const data = await res.json();
-    const availableIds = new Set((data.data || []).map((m) => m.id.toLowerCase()));
 
-    for (const model of ALLOWED_STANDARD_MODELS) {
-      if (availableIds.has(model.toLowerCase())) return model;
-    }
+  if (available.length === 0) throw new Error("No usable Groq chat model found on your account.");
 
-    const safeFallback = (data.data || [])
-      .map(m => m.id)
-      .find(id => {
-        const lower = id.toLowerCase();
-        return (lower.startsWith("llama") || lower.startsWith("gemma") || lower.startsWith("mixtral")) && !lower.includes("guard");
-      });
-    return safeFallback || "llama-3.3-70b-versatile";
-  } catch {
-    return "llama-3.3-70b-versatile";
+  // Pick from preference list first
+  for (const pref of MODEL_PREFERENCES) {
+    const match = available.find(id => id.toLowerCase() === pref.toLowerCase());
+    if (match) return match;
   }
+
+  // Fallback: first available llama, then any safe model
+  return available.find(id => id.toLowerCase().startsWith("llama")) || available[0];
 }
 
 export async function POST(req) {
@@ -45,7 +55,12 @@ export async function POST(req) {
       return NextResponse.json({ error: "No Groq API key provided." }, { status: 400 });
     }
 
-    const model = await pickBestGroqModel(apiKey);
+    let model;
+    try {
+      model = await pickBestGroqModel(apiKey);
+    } catch (e) {
+      return NextResponse.json({ error: `Model selection failed: ${e.message}` }, { status: 400 });
+    }
 
     const systemPrompt = `You are a restaurant accounting expert assistant for an Indian restaurant using Zoho Books.
 Your job is to help identify what a product is and suggest the correct account head for it.
@@ -53,7 +68,7 @@ Your job is to help identify what a product is and suggest the correct account h
 AVAILABLE ACCOUNT HEADS IN THIS SHEET: ${availableAccounts.length ? availableAccounts.join(", ") : "Not uploaded yet"}
 
 RESTAURANT ACCOUNTING RULES (India):
-- Groceries / Food Raw Materials: rice, dal, atta, spices, masala, ghee, oil, sauces, vinegar, dry fruits, knorr broth / powder, seasonings
+- Groceries / Food Raw Materials: rice, dal, atta, spices, masala, ghee, oil, sauces, vinegar, dry fruits, knorr broth / powder, seasonings, bouillon
 - Dairy: milk, paneer, curd, butter, cream, cheese, khoya, buttermilk
 - Poultry: raw fresh chicken, mutton, lamb, eggs, goat meat
 - Sea food: fish (basa, surmai, pomfret, rawas, salmon), prawns, shrimp, crab, lobster, squid
