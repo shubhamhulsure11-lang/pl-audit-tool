@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 
-const EXCLUDE_PATTERNS = ["whisper", "tts", "distil", "embed", "vision", "playai", "playht", "guard"];
-const MODEL_PREFERENCES = [
-  "llama-3.1-8b-instant", "llama3-8b", "llama-3.1-8b",
-  "llama-3.3-70b", "llama-3.1-70b", "llama3-70b",
-  "llama", "mixtral", "gemma2", "gemma",
+// Standard production Groq models (in preference order)
+const ALLOWED_STANDARD_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "llama3-70b-8192",
+  "llama3-8b-8192",
+  "mixtral-8x7b-32768",
+  "gemma2-9b-it"
 ];
 
 async function pickBestGroqModel(apiKey) {
@@ -12,17 +15,24 @@ async function pickBestGroqModel(apiKey) {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` }
     });
-    if (!res.ok) return null;
+    if (!res.ok) return "llama-3.3-70b-versatile";
     const data = await res.json();
-    const chatIds = (data.data || [])
-      .map((m) => m.id)
-      .filter((id) => !EXCLUDE_PATTERNS.some((pat) => id.toLowerCase().includes(pat)));
-    for (const pref of MODEL_PREFERENCES) {
-      const found = chatIds.find((id) => id.toLowerCase().includes(pref));
-      if (found) return found;
+    const availableIds = new Set((data.data || []).map((m) => m.id.toLowerCase()));
+
+    for (const model of ALLOWED_STANDARD_MODELS) {
+      if (availableIds.has(model.toLowerCase())) return model;
     }
-    return chatIds[0] || null;
-  } catch { return null; }
+
+    const safeFallback = (data.data || [])
+      .map(m => m.id)
+      .find(id => {
+        const lower = id.toLowerCase();
+        return (lower.startsWith("llama") || lower.startsWith("gemma") || lower.startsWith("mixtral")) && !lower.includes("guard");
+      });
+    return safeFallback || "llama-3.3-70b-versatile";
+  } catch {
+    return "llama-3.3-70b-versatile";
+  }
 }
 
 export async function POST(req) {
@@ -36,9 +46,6 @@ export async function POST(req) {
     }
 
     const model = await pickBestGroqModel(apiKey);
-    if (!model) {
-      return NextResponse.json({ error: "No Groq model available for your API key. Verify at console.groq.com." }, { status: 400 });
-    }
 
     const systemPrompt = `You are a restaurant accounting expert assistant for an Indian restaurant using Zoho Books.
 Your job is to help identify what a product is and suggest the correct account head for it.
@@ -46,25 +53,25 @@ Your job is to help identify what a product is and suggest the correct account h
 AVAILABLE ACCOUNT HEADS IN THIS SHEET: ${availableAccounts.length ? availableAccounts.join(", ") : "Not uploaded yet"}
 
 RESTAURANT ACCOUNTING RULES (India):
-- Groceries/Food: rice, dal, atta, spices, masala, ghee, oil, sauces, vinegar, dry fruits
+- Groceries / Food Raw Materials: rice, dal, atta, spices, masala, ghee, oil, sauces, vinegar, dry fruits, knorr broth / powder, seasonings
 - Dairy: milk, paneer, curd, butter, cream, cheese, khoya, buttermilk
-- Poultry: chicken, mutton, lamb, eggs, goat meat
+- Poultry: raw fresh chicken, mutton, lamb, eggs, goat meat
 - Sea food: fish (basa, surmai, pomfret, rawas, salmon), prawns, shrimp, crab, lobster, squid
 - Beverages (NON-ALCOHOLIC only): red bull, tonic, soda, juices, monin syrups, malas, mineral water, tea, coffee
 - Liquor Purchases (ALCOHOLIC only): wine, beer, whisky, vodka, rum, gin, tequila, brandy, champagne
 - Cigarette purchases: classic connect, marlboro, gold flake, wills, ice burst
 - Other Purchases: charcoal, coal, ice cubes, ice slabs, dry ice, skewers, toothpicks
 - Packing materials / Packaging & Disposables (SAME CATEGORY): takeaway boxes, foil, paper bags, tissue, straws, disposable cutlery
-- Cleaning and housekeeping: dishwash, detergent, floor cleaner, lizol, sanitizer, mops, garbage bags
+- Cleaning and housekeeping: dishwash, detergent, floor cleaner, lizol, sanitizer, mops, garbage bags, soap oil
 - Kitchen tools: utensils, crockery, glassware, kadai, tawa, hotelware, arcoroc, bar tools
 - Stationery & Office: registers, KOT books, pens, POS rolls, thermal paper
 
 When asked about an item, identify what it is, then state the correct account head from the AVAILABLE ACCOUNT HEADS list.
-Be concise. Use emojis sparingly. Always end with the suggested account head name in bold.`;
+Be concise. Always conclude with the suggested account head in bold.`;
 
     const messages = [
       { role: "system", content: systemPrompt },
-      ...history.slice(-8), // Keep last 8 messages for context
+      ...history.slice(-8),
       { role: "user", content: message }
     ];
 

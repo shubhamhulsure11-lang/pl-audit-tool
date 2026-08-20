@@ -113,7 +113,8 @@ const RESTAURANT_TAXONOMY = [
       "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan sauce", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri sauce", "ketchup", "vinegar",
       "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut", "black olive", "green olive", "stuffed olive", "olive slice",
       "cashew", "kaju", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
-      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla extract", "vanilla 4ltr", "food color", "food colouring"
+      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla extract", "vanilla 4ltr", "food color", "food colouring",
+      "knorr chicken broth", "chicken broth", "chicken powder", "knorr", "broth powder", "bouillon", "seasoning powder"
     ]
   },
   {
@@ -235,6 +236,8 @@ const VETO_RULES = [
   // "monin" or "syrup" blocks fruit classification
   { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial"] },
   { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial"] },
+  // "broth", "powder", "seasoning", "cube", "bouillon", "knorr" in item blocks poultry (it's a grocery seasoning)
+  { blockedCategoryId: "poultry", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr"] },
 ];
 
 function isVetoed(categoryId, itemNorm) {

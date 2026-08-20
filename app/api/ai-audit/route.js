@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 
-const EXCLUDE_PATTERNS = ["whisper", "tts", "distil", "embed", "vision", "playai", "playht", "guard"];
-const MODEL_PREFERENCES = [
-  "llama-3.1-8b-instant", "llama3-8b", "llama-3.1-8b",
-  "llama-3.3-70b", "llama-3.1-70b", "llama3-70b",
-  "llama", "mixtral", "gemma2", "gemma",
+// Standard production Groq models (in preference order)
+const ALLOWED_STANDARD_MODELS = [
+  "llama-3.3-70b-versatile",
+  "llama-3.1-8b-instant",
+  "llama3-70b-8192",
+  "llama3-8b-8192",
+  "mixtral-8x7b-32768",
+  "gemma2-9b-it"
 ];
 
 async function pickBestGroqModel(apiKey) {
@@ -12,23 +15,29 @@ async function pickBestGroqModel(apiKey) {
     const res = await fetch("https://api.groq.com/openai/v1/models", {
       headers: { Authorization: `Bearer ${apiKey}` }
     });
-    if (!res.ok) return null;
+    if (!res.ok) return "llama-3.3-70b-versatile";
     const data = await res.json();
-    const chatIds = (data.data || [])
-      .map((m) => m.id)
-      .filter((id) => !EXCLUDE_PATTERNS.some((pat) => id.toLowerCase().includes(pat)));
-    for (const pref of MODEL_PREFERENCES) {
-      const found = chatIds.find((id) => id.toLowerCase().includes(pref));
-      if (found) return found;
+    const availableIds = new Set((data.data || []).map((m) => m.id.toLowerCase()));
+
+    for (const model of ALLOWED_STANDARD_MODELS) {
+      if (availableIds.has(model.toLowerCase())) return model;
     }
-    return chatIds[0] || null;
-  } catch { return null; }
+
+    const safeFallback = (data.data || [])
+      .map(m => m.id)
+      .find(id => {
+        const lower = id.toLowerCase();
+        return (lower.startsWith("llama") || lower.startsWith("gemma") || lower.startsWith("mixtral")) && !lower.includes("guard");
+      });
+    return safeFallback || "llama-3.3-70b-versatile";
+  } catch {
+    return "llama-3.3-70b-versatile";
+  }
 }
 
 export async function POST(req) {
   try {
     const body = await req.json();
-    // Support both single-item mode and batch mode
     const { singleItem, items, availableAccounts = [], apiKey: customKey } = body;
 
     const apiKey = customKey || process.env.GROQ_API_KEY;
@@ -37,35 +46,31 @@ export async function POST(req) {
     }
 
     const model = await pickBestGroqModel(apiKey);
-    if (!model) {
-      return NextResponse.json({ error: "No Groq model available. Verify your key at console.groq.com." }, { status: 400 });
-    }
-
     const accounts = availableAccounts.join(", ");
 
     // ─── SINGLE ITEM MODE ──────────────────────────────────────────────────────
     if (singleItem) {
       const { item, vendor, actualAccount } = singleItem;
-      const prompt = `Restaurant item audit. Analyze this ONE item and determine if it is misclassified.
+      const prompt = `Restaurant accounting auditor. Analyze this ONE purchase item.
 
 Item: "${item}"
 Vendor: "${vendor}"
 Current Account Head in Zoho: "${actualAccount}"
 Available Account Heads: ${accounts}
 
-Restaurant rules:
-- Groceries: rice, dal, atta, spices, masala, ghee, cooking oil, sugar, sauces, vinegar, vanilla essence, food coloring
+Rules:
+- Groceries / Food Raw Materials: rice, dal, atta, spices, masala, ghee, cooking oil, sugar, sauces, vinegar, vanilla essence, knorr, chicken broth powder, seasonings, broth cubes, olives, dry fruits
 - Dairy: milk, paneer, curd, butter, cream, cheese, khoya, buttermilk (NOT ghee)
-- Poultry: chicken, mutton, lamb, eggs, goat meat
+- Poultry: fresh raw chicken, mutton, lamb, eggs, goat meat (processed broth/powders are Groceries)
 - Sea food: fish (basa, surmai, pomfret, rawas, salmon, tuna), prawns, shrimp, crab, lobster, squid
-- Beverages (NON-ALCOHOLIC): red bull, tonic water, soda, juices, monin syrups, malas, mineral water, tea, coffee, kokum
+- Beverages (NON-ALCOHOLIC): red bull, tonic water, soda, juices, monin syrups, malas, mineral water, tea, coffee
 - Liquor Purchases (ALCOHOLIC ONLY): wine, beer, whisky, vodka, rum, gin, tequila, brandy, champagne
 - Cigarette purchases: classic connect, classic bt, ice burst, marlboro, gold flake, wills
 - Other Purchases: charcoal, coal, ice cubes, ice slabs, dry ice, skewers, toothpicks
 - Packing materials / Packaging & Disposables (same): takeaway boxes, foil, paper bags, tissue, straws, disposable cutlery
-- Cleaning and housekeeping: dishwash, detergent, lizol, phenyl, harpic, sanitizer, mops, garbage bags, soap oil
+- Cleaning: dishwash, detergent, lizol, phenyl, harpic, sanitizer, mops, garbage bags, soap oil
 - Kitchen tools: utensils, crockery, glassware (arcoroc, pilsner), kadai, tawa, hotelware, bar tools, dip bowls
-- Stationery & Office: registers, KOT books, pens, POS rolls, thermal paper, toners
+- Stationery: registers, KOT books, pens, POS rolls, thermal paper, toners
 
 If correctly classified, return: {"isMisclassified": false}
 If misclassified, return:
@@ -104,7 +109,7 @@ Return ONLY valid JSON. No markdown, no extra text.`;
       }
     }
 
-    // ─── BATCH MODE (legacy, max 10 items) ──────────────────────────────────────
+    // ─── BATCH MODE (fallback) ──────────────────────────────────────────────────
     if (!items || !items.length) {
       return NextResponse.json({ error: "No items provided." }, { status: 400 });
     }
@@ -112,9 +117,9 @@ Return ONLY valid JSON. No markdown, no extra text.`;
     const itemsToAudit = items.slice(0, 10).map(({ item, vendor, actualAccount }) => ({ item, vendor, actualAccount }));
 
     const RULES = `Rules:
-1.Groceries: rice, dal, atta, spices, masala, cooking oil, sugar, sauces, vinegar, ghee, vanilla essence, food color
+1.Groceries: rice, dal, atta, spices, masala, cooking oil, sugar, sauces, vinegar, ghee, vanilla, knorr broth, seasoning
 2.Dairy: milk, paneer, curd, butter, cream, cheese, khoya, buttermilk
-3.Poultry: chicken, mutton, lamb, eggs
+3.Poultry: fresh chicken, mutton, lamb, eggs
 4.Sea food: basa, surmai, pomfret, rawas, salmon, prawns, shrimp, crab, lobster, squid
 5.Beverages(NON-ALCOHOLIC): red bull, tonic, soda, juices, monin, malas, mineral water, tea, coffee
 6.Liquor Purchases(ALCOHOLIC only): wine, beer, whisky, vodka, rum, gin, tequila, brandy, champagne
