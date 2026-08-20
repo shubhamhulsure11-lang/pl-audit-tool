@@ -8,15 +8,22 @@ const n = (v) => typeof v === "number" ? v : Number(String(v ?? "").replace(/[,�
 const show = (v) => inr.format(v || 0);
 const col = (heads, choices) => choices.map(clean).map(x => heads.map(clean).indexOf(x)).find(x => x >= 0) ?? -1;
 
-// Restaurant-specific Account Head Taxonomy & Keyword Rules
+// ── TAXONOMY: Only specific brands + unambiguous multi-word phrases ──────────
+// RULE: No generic single words (oil, slice, wheat, apple, etc.) — they cause false positives.
+// Single words are only allowed when they are UNAMBIGUOUS in a restaurant context (e.g. "prawns", "paneer", "mutton").
 const RESTAURANT_TAXONOMY = [
   {
     id: "cigarettes",
     label: "Cigarette purchases",
     aliases: ["cigarette", "cigar", "tobacco", "smoke"],
     keywords: [
-      "classic connect", "cl ice burst", "ice burst", "classic bt", "marlboro", "gold flake", "wills", "benson", "king size", "switch", "capsule", "esse", "dunhill", "cigarette", "cigarettes", "cigar"
-      // NOTE: "classic" removed — too generic and matches e.g. "Bacardi Classic". Cigarettes must match via longer phrases or context.
+      "classic connect", "classic regular", "classic milds", "classic ultra milds",
+      "cl ice burst", "ice burst", "classic bt", "classic ft",
+      "marlboro", "marlboro lights", "marlboro red",
+      "gold flake", "gold flake lights", "gold flake kings",
+      "wills navy cut", "wills lights", "wills milds",
+      "benson hedges", "dunhill", "esse", "parliament",
+      "cigarette", "cigarettes", "cigar", "hookah tobacco", "shisha"
     ]
   },
   {
@@ -24,16 +31,21 @@ const RESTAURANT_TAXONOMY = [
     label: "Liquor Purchases",
     aliases: ["liquor", "alcohol", "spirit", "wine", "beer", "whisky", "whiskey", "bar purchase", "excise"],
     keywords: [
-      "jacobs creek", "shiraz", "cabernet", "chardonnay", "merlot", "sauvignon", "pinot noir", "wine", "red wine", "white wine",
-      "whisky", "whiskey", "scotch", "bourbon", "single malt", "glenfiddich", "black label", "red label", "double black", "chivas", "jack daniels", "jameson", "ballantines", "teachers", "100 pipers", "vat 69", "antiquity", "blenders pride", "royal challenge", "signature", "royal stag", "imperial blue", "oakton",
+      "jacobs creek", "jacob creek", "shiraz", "cabernet", "chardonnay", "merlot", "sauvignon", "pinot noir",
+      "red wine", "white wine", "rose wine", "sula wine", "fratelli", "grover", "chandon", "prosecco", "sparkling wine",
+      "whisky", "whiskey", "scotch", "bourbon", "single malt",
+      "glenfiddich", "black label", "red label", "double black", "chivas regal", "jack daniels",
+      "jameson", "ballantines", "teachers", "100 pipers", "vat 69", "antiquity",
+      "blenders pride", "royal challenge", "royal stag", "imperial blue", "oakton",
       "vodka", "absolut", "smirnoff", "magic moments", "grey goose", "ciroc", "belvedere",
       "rum", "old monk", "bacardi", "captain morgan",
-      "gin", "bombay sapphire", "beefeater", "tanqueray", "gordons", "greater than", "stranger & sons", "hendricks", "gin & tonic",
-      "tequila", "jose cuervo", "patron", "don julio", "camino", "sauza",
+      "gin", "bombay sapphire", "beefeater", "tanqueray", "gordons", "greater than gin", "hendricks",
+      "tequila", "jose cuervo", "patron tequila", "don julio", "camino real", "sauza",
       "brandy", "mansion house", "cognac", "hennessy",
-      "champagne", "prosecco", "sparkling wine", "sula", "fratelli", "grover", "chandon", "jacob creek",
-      "beer", "kingfisher", "budweiser", "corona", "bira", "heineken", "carlsberg", "tuborg", "hoegaarden", "stella artois", "miller", "breezer", "craft beer", "draught beer",
-      "baileys", "jagermeister", "kahlua", "cointreau", "campari", "aperol", "sambuca", "liqueur"
+      "beer", "kingfisher", "budweiser", "corona beer", "bira", "heineken", "carlsberg", "tuborg",
+      "hoegaarden", "stella artois", "miller", "breezer", "craft beer", "draught beer",
+      "baileys", "jagermeister", "kahlua", "cointreau", "campari", "aperol", "sambuca", "liqueur",
+      "champagne"
     ]
   },
   {
@@ -41,8 +53,14 @@ const RESTAURANT_TAXONOMY = [
     label: "Sea food purchases",
     aliases: ["sea food", "seafood", "fish", "prawn", "crab", "marine"],
     keywords: [
-      "16/20 prawns", "tiger prawn", "tiger prawns", "jumbo prawn", "jumbo prawns", "v. basa", "v basa", "basa fillet", "basa",
-      "prawns", "prawn", "shrimp", "shrimps", "surmai", "kingfish", "pomfret", "white pomfret", "black pomfret", "rawas", "indian salmon", "salmon", "rohu", "katla", "tilapia", "tuna", "mackerel", "bangda", "hilsa", "bombil", "bombay duck", "squid", "calamari", "octopus", "crab", "mud crab", "lobster", "clams", "oysters", "fish"
+      "16/20 prawns", "21/25 prawns", "26/30 prawns", "tiger prawn", "tiger prawns", "jumbo prawn", "jumbo prawns",
+      "v. basa", "v basa", "basa fillet", "basa",
+      "prawns", "prawn", "shrimp", "shrimps",
+      "surmai", "kingfish", "pomfret", "white pomfret", "black pomfret",
+      "rawas", "indian salmon", "salmon", "rohu", "katla", "tilapia",
+      "tuna", "mackerel", "bangda", "hilsa", "bombil", "bombay duck",
+      "squid", "calamari", "octopus", "crab", "mud crab", "lobster", "clams", "oysters",
+      "fish fillet", "fish curry cut"
     ]
   },
   {
@@ -50,10 +68,13 @@ const RESTAURANT_TAXONOMY = [
     label: "Poultry",
     aliases: ["poultry", "chicken", "mutton", "meat", "egg", "nonveg", "non-veg"],
     keywords: [
-      "chicken breast", "chicken leg", "chicken drumstick", "chicken wings", "chicken keema", "chicken mince", "chicken curry cut", "chicken lollipop", "chicken liver", "boneless chicken", "broiler chicken", "country chicken", "desi chicken", "whole chicken", "tandoori chicken", "chicken",
-      "mutton keema", "mutton curry cut", "mutton chops", "mutton boti", "mutton brain", "lamb chops", "lamb shank", "goat meat", "mutton", "lamb",
+      "chicken breast", "chicken leg", "chicken drumstick", "chicken wings", "chicken keema",
+      "chicken mince", "chicken curry cut", "chicken lollipop", "chicken liver", "boneless chicken",
+      "broiler chicken", "country chicken", "desi chicken", "whole chicken", "chicken",
+      "mutton keema", "mutton curry cut", "mutton chops", "mutton boti", "mutton brain",
+      "lamb chops", "lamb shank", "goat meat", "mutton", "lamb",
       "brown eggs", "white eggs", "quail eggs", "egg tray", "eggs", "egg",
-      "beef", "pork", "bacon", "ham", "sausage", "pepperoni"
+      "beef", "pork", "bacon", "ham", "pepperoni"
     ]
   },
   {
@@ -61,31 +82,38 @@ const RESTAURANT_TAXONOMY = [
     label: "Beverages",
     aliases: ["beverage", "soft drink", "drinks", "cold drink", "non alcoholic"],
     keywords: [
-      "real apple", "real mango", "real orange", "real cranberry", "real pineapple", "real litchi", "real juice", "real",
-      "redbull", "red bull", "monster energy", "sting", "ocean fruit water",
-      "tonic water", "ginger ale", "gingerale", "club soda", "soda water", "lehar soda", "kinley soda", "soda",
-      "diet coke", "coke zero", "coca cola", "coke", "pepsi", "diet pepsi", "7up", "sprite", "thums up", "limca", "fanta", "mirinda", "mountain dew",
-      "tropicana", "minute maid", "frooti", "maaza", "maaza slice", "appy fizz", "appy", "raw pressery", "paper boat", "juice",
+      "real apple juice", "real mango juice", "real orange juice", "real cranberry", "real pineapple",
+      "real litchi", "real juice", "tropicana", "minute maid", "raw pressery", "paper boat",
+      "red bull", "redbull", "monster energy", "sting energy",
+      "tonic water", "schweppes tonic", "ginger ale", "club soda", "soda water", "lehar soda", "kinley soda",
+      "diet coke", "coke zero", "coca cola", "thums up", "limca", "sprite", "fanta", "mirinda", "mountain dew", "pepsi",
       "bisleri", "kinley water", "aquafina", "vedica", "himalayan water", "packaged water", "mineral water",
-      "blue curacao", "grenadine", "mojito syrup", "peach syrup", "watermelon syrup", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush", "orange crush", "pineapple crush", "monin", "malas", "malass", "crush", "syrup", "fruit syrup"
+      "monin", "malas", "malass",
+      "watermelon syrup", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush",
+      "orange crush", "pineapple crush", "mojito syrup", "grenadine", "blue curacao",
+      "fruit syrup", "mocktail syrup",
+      "frooti", "maaza", "appy fizz"
     ]
   },
   {
     id: "groceries",
     label: "Groceries",
-    aliases: ["grocer", "food and grocery", "food & grocery", "food purchase", "provision", "dry good", "raw material", "staple", "spices", "grain"],
+    aliases: ["grocer", "food and grocery", "food & grocery", "food purchase", "provision", "dry good", "raw material", "staple", "spices", "grain", "ingredients"],
     keywords: [
-      "sona masoori", "basmati rice", "kolam rice", "rice", "basmati", "kolam", "wheat flour", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour", "cornstarch", "custard powder",
-      "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal", "kabuli chana", "rajma", "soya chunks", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "breadcrumbs", "dal", "lentil", "lentils",
-      "garam masala", "chaat masala", "biryani masala", "kitchen king", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "coriander seed", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "kashmiri chilli", "degi mirch", "chili flakes",
-      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "clove", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
-      "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil",
-      "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee", // Rule: Ghee is Groceries
+      "sona masoori", "basmati rice", "kolam rice", "ponni rice", "rice", "basmati", "kolam",
+      "wheat flour", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour",
+      "cornstarch", "custard powder", "bread crumbs", "breadcrumbs",
+      "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal",
+      "kabuli chana", "rajma", "soya chunks", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "dal", "lentil", "lentils",
+      "garam masala", "chaat masala", "biryani masala", "kitchen king masala", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "red chilli powder", "kashmiri chilli", "degi mirch", "chili flakes",
+      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
+      "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil", "cooking oil",
+      "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee",
       "brown sugar", "jaggery", "gur", "honey", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg", "sugar", "salt",
-      "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "vinegar", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri", "ketchup", "sauce",
-      "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut", "black olive", "green olive", "olive slice",
+      "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan sauce", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri sauce", "ketchup", "vinegar",
+      "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut", "black olive", "green olive", "stuffed olive", "olive slice",
       "cashew", "kaju", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
-      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla 4ltr", "food color"
+      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla extract", "vanilla 4ltr", "food color", "food colouring"
     ]
   },
   {
@@ -100,11 +128,11 @@ const RESTAURANT_TAXONOMY = [
   {
     id: "other_purchases",
     label: "Other Purchases",
-    aliases: ["other purchase", "other purchases", "misc", "miscellaneous", "general purchase", "kitchen consumable", "other expense"],
+    aliases: ["other purchase", "other purchases", "misc", "miscellaneous", "general purchase", "other expense"],
     keywords: [
-      "wood charcoal", "charcoal", "coal", // Rule: Charcoal is Other Purchases
-      "ice slab", "ice slabs", "ice cube", "ice cubes", "crushed ice", "dry ice", "ice", // Rule: Ice is Other Purchases
-      "wooden skewers", "bamboo skewers", "skewers", "toothpick", "toothpicks", "birthday candles", "candle", "lighter", "matchbox"
+      "wood charcoal", "charcoal", "coal",
+      "ice slab", "ice slabs", "ice cube", "ice cubes", "crushed ice", "dry ice",
+      "wooden skewers", "bamboo skewers", "skewers", "toothpick", "toothpicks", "birthday candles", "matchbox"
     ]
   },
   {
@@ -112,8 +140,9 @@ const RESTAURANT_TAXONOMY = [
     label: "Kitchen tools",
     aliases: ["kitchen tool", "kitchen tools", "utensil", "utensils", "crockery", "cutlery", "hotelware", "equipment", "bar tool"],
     keywords: [
-      "dal katori", "vertigo cream", "katori", "dip bowl", "soup bowl", "dip bowl round", "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "mixing bowl", "baking tray", "sizzler plate",
-      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware", "arcoroc", "pilsner glass", "beer glass", "pilsner", "wine glass", "shot glass", "whisky glass",
+      "dal katori", "katori", "dip bowl", "soup bowl", "dip bowl round", "mixing bowl", "salad bowl",
+      "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "baking tray", "sizzler plate",
+      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware", "arcoroc", "pilsner glass", "pilsner", "beer glass", "wine glass", "shot glass", "whisky glass", "water glass",
       "cocktail shaker", "bar strainer", "jigger", "peg measurer", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
     ]
   },
@@ -123,7 +152,7 @@ const RESTAURANT_TAXONOMY = [
     aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent", "soap"],
     keywords: [
       "dishwash bar", "dishwash liquid", "dishwash", "vim bar", "vim liquid", "vim", "exo", "pril", "surf excel", "surf", "ariel", "tide", "rin", "detergent powder", "liquid detergent", "detergent",
-      "soap oil", "soap oil thick", "liquid soap",
+      "soap oil", "soap oil thick", "liquid soap", "bar soap",
       "floor cleaner", "lizol", "phenyl", "white phenyl", "colin", "glass cleaner", "harpic", "toilet cleaner", "bathroom cleaner", "drain cleaner", "caustic soda",
       "bleaching powder", "bleach", "disinfectant", "hand sanitizer", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon",
       "phool jhadu", "coconut broom", "broom", "jhadu", "mop", "floor wiper", "wiper", "duster", "cleaning cloth", "microfiber cloth", "sponge", "steel scrubber", "green scrubber", "scrubber", "scotch brite", "garbage bag", "trash bag", "dustbin cover", "dust pan", "rubber gloves", "room freshener", "odonil"
@@ -132,10 +161,10 @@ const RESTAURANT_TAXONOMY = [
   {
     id: "packaging",
     label: "Packaging & Disposables",
-    aliases: ["packag", "packing", "pack", "disposab", "takeaway", "parcel", "container"],
+    aliases: ["packag", "packing", "pack material", "disposab", "takeaway", "parcel"],
     keywords: [
-      "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box", "plastic container", "container",
-      "kraft paper bag", "non woven bag", "d-cut bag", "paper bag", "carry bag", "zip lock", "polythene",
+      "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box", "plastic container", "food container",
+      "kraft paper bag", "non woven bag", "d-cut bag", "paper bag", "carry bag", "zip lock", "polythene bag",
       "paper plate", "disposable plate", "paper cup", "plastic glass", "disposable glass",
       "paper napkin", "cocktail napkin", "tissue paper", "tissue roll", "kitchen roll", "toilet roll", "tissue", "napkin",
       "aluminium foil", "silver foil", "cling wrap", "cling film", "butter paper", "parchment paper",
@@ -156,8 +185,8 @@ const RESTAURANT_TAXONOMY = [
     label: "Fresh Fruits",
     aliases: ["fruit", "fresh fruit"],
     keywords: [
-      "sweet lime", "fresh mango", "blueberry fresh",
-      "fresh apple", "seb", "banana", "kela", "fresh orange", "santra", "mosambi", "pomegranate", "anar", "fresh watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "fresh pineapple", "ananas", "fresh mango", "aam", "grapes", "angoor", "fresh strawberry", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
+      "sweet lime", "fresh mango", "blueberry fresh", "fresh strawberry",
+      "fresh apple", "seb", "banana", "kela", "fresh orange", "santra", "mosambi", "pomegranate", "anar", "fresh watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "fresh pineapple", "ananas", "aam", "grapes", "angoor", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
     ]
   },
   {
@@ -165,13 +194,12 @@ const RESTAURANT_TAXONOMY = [
     label: "Stationery & Office",
     aliases: ["station", "office supplies", "printing", "paper"],
     keywords: [
-      "attendance register", "bill book", "kot book", "receipt book", "permanent marker", "ball pen", "gel pen", "pos roll", "billing roll", "printer cartridge",
-      "register", "notebook", "pen", "pencil", "marker", "stapler", "stapler pin", "punch machine", "brown tape", "cello tape", "tape", "scissor", "scissors", "stamp pad", "rubber band", "binder clip", "file", "folder", "envelope", "a4 paper", "toner"
+      "attendance register", "bill book", "kot book", "receipt book", "permanent marker", "ball pen", "gel pen", "pos roll", "billing roll", "thermal roll", "printer cartridge", "toner cartridge",
+      "register", "notebook", "pencil", "marker", "stapler", "stapler pin", "punch machine", "brown tape", "cello tape", "scissor", "scissors", "stamp pad", "rubber band", "binder clip", "envelope", "a4 paper", "toner"
     ]
   }
 ];
 
-// Helper to clean item string into lowercase words
 function cleanWords(str) {
   return String(str || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -306,15 +334,15 @@ async function readFile(file) {
   const at = rows.findIndex(r => r.map(clean).includes("vendorname") && r.map(clean).some(x => x === "billdate" || x === "date"));
   if (at < 0) throw new Error("I could not find the Zoho header row. Please use a Zoho purchase export containing Bill Date and Vendor Name.");
   const h = rows[at], i = {
-    date: col(h, ["Bill Date", "Date"]),
-    vendor: col(h, ["Vendor Name", "Vendor"]),
-    bill: col(h, ["Bill Number", "Invoice Number"]),
-    account: col(h, ["Account Name", "Account", "Expense Account", "Account Head", "Chart of Accounts"]),
-    item: col(h, ["Item Name", "Item"]),
-    qty: col(h, ["Quantity", "Qty"]),
-    rate: col(h, ["Rate", "Item Rate"]),
-    total: col(h, ["Item Total", "Line Item Total", "Total"]),
-    branch: col(h, ["Branch Name", "Branch"])
+    date: col(h, ["Bill Date", "Date", "Invoice Date"]),
+    vendor: col(h, ["Vendor Name", "Vendor", "Supplier Name", "Supplier"]),
+    bill: col(h, ["Bill Number", "Invoice Number", "Bill No", "Bill#", "Invoice#"]),
+    account: col(h, ["Account Name", "Account", "Expense Account", "Account Head", "Chart of Accounts", "Expense Head", "Accounts"]),
+    item: col(h, ["Item Name", "Item", "Product Name", "Product", "Description", "Item Description", "Items"]),
+    qty: col(h, ["Quantity", "Qty", "Quantity Billed"]),
+    rate: col(h, ["Rate", "Item Rate", "Price", "Unit Price"]),
+    total: col(h, ["Item Total", "Line Item Total", "Total", "Amount", "Line Amount"]),
+    branch: col(h, ["Branch Name", "Branch", "Location"])
   };
   if (i.vendor < 0 || i.date < 0) throw new Error("Bill Date and Vendor Name are required.");
   const get = (row, key) => i[key] >= 0 ? row[i[key]] : "";
@@ -334,7 +362,7 @@ async function readFile(file) {
       branch: String(get(row, "branch") || "").trim()
     };
   }).filter(r => r.vendor && clean(r.vendor) !== "vendorname" && (r.item || r.total));
-  return { name: file.name, records, hasAccountCol: i.account >= 0 };
+  return { name: file.name, records, hasAccountCol: i.account >= 0, colMap: i };
 }
 
 function groups(rows, key) { return rows.reduce((m, r) => { const k = key(r); m.set(k, [...(m.get(k) || []), r]); return m; }, new Map()); }
@@ -381,75 +409,47 @@ function ThresholdInput({ label, value, onChange, maxVal = 100 }) {
   return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="0" max={maxVal} value={value} onChange={e => onChange(Math.max(0, Math.min(maxVal, e.target.value === "" ? 0 : Number(e.target.value) || 0)))} /><span className="thresh-pct">%</span></div></label>;
 }
 
-function MisclassificationsView({ items, current, onGoToPivot }) {
+function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sharedAccounts }) {
   const [q, setQ] = useState("");
-  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || localStorage.getItem("gemini_api_key") || "" : ""));
-  const [showKeyModal, setShowKeyModal] = useState(false);
-  const [tempKey, setTempKey] = useState("");
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiError, setAiError] = useState("");
+  const apiKey = sharedApiKey;
+  const [rowAiState, setRowAiState] = useState({}); // { [itemKey]: { loading, result, error } }
   const [aiResults, setAiResults] = useState([]);
 
-  const saveApiKey = (k) => {
-    setApiKey(k);
-    if (typeof window !== "undefined") localStorage.setItem("groq_api_key", k);
-    setShowKeyModal(false);
-  };
-
-  const runAiAudit = async () => {
+  const askAiForRow = async (x) => {
+    const rowKey = `${x.item}:::${x.vendor}`;
     if (!apiKey) {
-      setTempKey("");
-      setShowKeyModal(true);
+      alert("Please add your Groq API key using the 🔑 button in the bottom-right chat widget.");
       return;
     }
-    setAiLoading(true);
-    setAiError("");
-
+    setRowAiState(prev => ({ ...prev, [rowKey]: { loading: true, result: null, error: null } }));
     try {
-      // Collect unique items from the current sheet
-      const uniqueMap = new Map();
-      (current?.records || []).forEach(r => {
-        if (r.item && !uniqueMap.has(r.item)) {
-          uniqueMap.set(r.item, { item: r.item, vendor: r.vendor, actualAccount: r.account, total: r.total });
-        }
-      });
-
-      const itemsList = [...uniqueMap.values()];
-      const sheetAccounts = [...new Set((current?.records || []).map(r => r.account).filter(a => a && a !== "Unassigned Account"))];
-
       const res = await fetch("/api/ai-audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          items: itemsList,
-          availableAccounts: sheetAccounts,
+          singleItem: { item: x.item, vendor: x.vendor, actualAccount: x.actualAccount },
+          availableAccounts: sharedAccounts,
           apiKey
         })
       });
-
       const data = await res.json();
-      if (!res.ok) {
-        throw new Error(data.error || "AI Audit failed");
-      }
-
-      if (data.results && Array.isArray(data.results)) {
-        // Map total amounts to AI flagged results
-        const mappedAi = data.results.map(r => {
-          const matchedRecs = (current?.records || []).filter(rec => rec.item === r.item);
-          const total = matchedRecs.reduce((s, rec) => s + rec.total, 0);
-          return {
-            ...r,
-            isAi: true,
-            total: total || 0,
-            matchedKeyword: r.webSummary || "Web Search"
+      if (!res.ok || data.error) throw new Error(data.error || "AI error");
+      setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: data.result, error: null } }));
+      if (data.result?.isMisclassified) {
+        setAiResults(prev => {
+          const existing = prev.findIndex(r => r.item === x.item && r.vendor === x.vendor);
+          const entry = {
+            ...x, isAi: true,
+            suggestedAccount: data.result.suggestedAccount || x.suggestedAccount,
+            matchedKeyword: data.result.webSummary || "AI Analysis",
+            reason: data.result.reason || x.reason
           };
+          if (existing >= 0) { const next = [...prev]; next[existing] = entry; return next; }
+          return [...prev, entry];
         });
-        setAiResults(mappedAi);
       }
     } catch (e) {
-      setAiError(e.message);
-    } finally {
-      setAiLoading(false);
+      setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: null, error: e.message } }));
     }
   };
 
@@ -482,7 +482,7 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
     <section className="panel">
       <div className="panelhead">
         <div>
-          <p className="eyebrow">RESTAURANT AUDIT & WEB INTELLIGENCE</p>
+          <p className="eyebrow">RESTAURANT AUDIT — RULE ENGINE + AI LAYER</p>
           <h2>Account Head Misclassifications</h2>
         </div>
         <div className="pivot-summary-badges">
@@ -492,54 +492,14 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
       </div>
 
       <div className="misclass-info-banner">
-        <span>💡</span>
+        <span>🔬</span>
         <div style={{ flex: 1 }}>
-          <strong>Dual-Layer Audit:</strong> Instant local restaurant rules + Groq AI (Llama 3.3 70B) product classification to verify unknown item codes, SKUs, and packaging supplies.
+          <strong>Dual-Layer Audit:</strong> Rule engine flags high-confidence misclassifications. Click <strong>🤖 Ask AI</strong> on any row to get a second AI opinion on that specific item — uses your Groq key from the chat widget.
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <button
-            className="ai-run-btn"
-            onClick={runAiAudit}
-            disabled={aiLoading}
-          >
-            {aiLoading ? "🤖 AI Auditing..." : "🤖 Run AI Audit"}
-          </button>
-          <button
-            className="ai-key-btn"
-            onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}
-            title="Configure Groq API Key"
-          >
-            ⚙️ {apiKey ? "API Key Set" : "Add API Key"}
-          </button>
-        </div>
+        <button className="pivot-btn" onClick={onGoToPivot} style={{ whiteSpace: "nowrap" }}>
+          View Account Pivot &rarr;
+        </button>
       </div>
-
-      {aiError && (
-        <div className="ai-error-box">
-          <strong>AI Audit Notice:</strong> {aiError}
-          <button onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}>Enter Groq API Key</button>
-        </div>
-      )}
-
-      {showKeyModal && (
-        <div className="key-modal-overlay">
-          <div className="key-modal">
-            <h3>Groq API Key</h3>
-            <p>Paste your free Groq API key to enable AI-powered product classification. Get one free at <strong>console.groq.com</strong>. The key is saved safely in your browser.</p>
-            <input
-              type="password"
-              placeholder="gsk_..."
-              className="key-input"
-              value={tempKey}
-              onChange={e => setTempKey(e.target.value)}
-            />
-            <div className="key-modal-actions">
-              <button className="btn-cancel" onClick={() => setShowKeyModal(false)}>Cancel</button>
-              <button className="btn-save" onClick={() => saveApiKey(tempKey)}>Save Key</button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className="pivot-toolbar">
         <div className="pivot-search-wrap">
@@ -553,36 +513,59 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
           />
           {q && <button className="pivot-clear-btn" onClick={() => setQ("")}>✕</button>}
         </div>
-        {onGoToPivot && (
-          <button className="pivot-btn" onClick={onGoToPivot}>
-            View Account Pivot &rarr;
-          </button>
-        )}
       </div>
 
-      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Detection / Web Summary", "Amount Exposure"]}>
-        {filtered.length ? filtered.map((x, i) => (
-          <tr key={i}>
-            <td>
-              <div style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</div>
-              {x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
-            </td>
-            <td>{x.vendor}</td>
-            <td><span className="pill-actual-acc">{x.actualAccount}</span></td>
-            <td><span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span></td>
-            <td>
-              {x.isAi ? (
-                <span className="pill-ai-badge">🌐 Web: {x.webSummary || x.matchedKeyword}</span>
-              ) : (
-                <span className="rule-tag">matched "{x.matchedKeyword}"</span>
-              )}
-            </td>
-            <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)" }}>{show(x.total)}</td>
-          </tr>
-        )) : (
+      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Detection / AI Summary", "Amount", "AI Check"]}>
+        {filtered.length ? filtered.map((x, i) => {
+          const rowKey = `${x.item}:::${x.vendor}`;
+          const rowAi = rowAiState[rowKey];
+          return (
+            <tr key={i}>
+              <td>
+                <div style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</div>
+                {x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
+                {rowAi?.result && !rowAi.result.isMisclassified && (
+                  <small style={{ color: "#16a34a", display: "block", marginTop: "3px", fontSize: "11px" }}>✅ AI: Correctly classified</small>
+                )}
+                {rowAi?.error && (
+                  <small style={{ color: "#dc2626", display: "block", marginTop: "3px", fontSize: "10px" }}>⚠ {rowAi.error}</small>
+                )}
+              </td>
+              <td>{x.vendor}</td>
+              <td><span className="pill-actual-acc">{x.actualAccount}</span></td>
+              <td>
+                {rowAi?.result?.isMisclassified ? (
+                  <span className="pill-suggested-acc">🤖 {rowAi.result.suggestedAccount}</span>
+                ) : (
+                  <span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span>
+                )}
+              </td>
+              <td>
+                {rowAi?.result?.webSummary ? (
+                  <span className="pill-ai-badge">🤖 {rowAi.result.webSummary}</span>
+                ) : x.isAi ? (
+                  <span className="pill-ai-badge">🤖 {x.matchedKeyword}</span>
+                ) : (
+                  <span className="rule-tag">matched "{x.matchedKeyword}"</span>
+                )}
+              </td>
+              <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)", whiteSpace: "nowrap" }}>{show(x.total)}</td>
+              <td>
+                <button
+                  className="ask-ai-row-btn"
+                  onClick={() => askAiForRow(x)}
+                  disabled={rowAi?.loading}
+                  title="Ask AI about this item"
+                >
+                  {rowAi?.loading ? "..." : "🤖"}
+                </button>
+              </td>
+            </tr>
+          );
+        }) : (
           <tr>
-            <td colSpan="6">
-              <Empty>{combinedItems.length === 0 ? "🎉 No account head misclassifications detected! All items match their restaurant categories." : "No items match your search filter."}</Empty>
+            <td colSpan="7">
+              <Empty>{combinedItems.length === 0 ? "🎉 No misclassifications detected by rule engine! Use 🤖 Ask AI buttons on any item to double-check with AI." : "No items match your search."}</Empty>
             </td>
           </tr>
         )}
@@ -829,14 +812,216 @@ function AccountPivot({ current }) {
   );
 }
 
+// ─── DATA PREVIEW COMPONENT ─────────────────────────────────────────────────
+function DataPreview({ data }) {
+  if (!data) return null;
+  const { name, records, colMap } = data;
+  const sample = records.slice(0, 20);
+  const blankItem = records.filter(r => !r.item).length;
+  const blankAccount = records.filter(r => !r.account || r.account === "Unassigned Account").length;
+  return (
+    <section className="panel" style={{ marginTop: 0 }}>
+      <div className="panelhead">
+        <div>
+          <p className="eyebrow">DATA VERIFICATION</p>
+          <h2>Parsed File Preview — {name}</h2>
+        </div>
+        <div className="pivot-summary-badges">
+          <b className="badge">{records.length} rows parsed</b>
+          {blankAccount > 0 && <b className="badge" style={{ background: "#fef3c7", color: "#92400e" }}>⚠ {blankAccount} rows missing Account</b>}
+          {blankItem > 0 && <b className="badge" style={{ background: "#fef3c7", color: "#92400e" }}>⚠ {blankItem} rows missing Item Name</b>}
+        </div>
+      </div>
+      {colMap && (
+        <div className="col-map-bar">
+          {Object.entries(colMap).filter(([, v]) => v !== null).map(([k, v]) => (
+            <span key={k} className="col-map-tag">
+              <strong>{k}</strong> → Col {v}
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="table">
+        <table>
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Date</th>
+              <th>Vendor</th>
+              <th>Bill No.</th>
+              <th style={{ background: blankAccount > 0 ? "#fef9c3" : undefined }}>Account Head</th>
+              <th style={{ background: blankItem > 0 ? "#fef9c3" : undefined }}>Item Name</th>
+              <th>Qty</th>
+              <th>Rate</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sample.map((r, i) => (
+              <tr key={i}>
+                <td style={{ color: "var(--muted)", fontSize: 11 }}>{i + 1}</td>
+                <td>{r.date}</td>
+                <td style={{ fontWeight: 500 }}>{r.vendor}</td>
+                <td style={{ color: "var(--muted)" }}>{r.bill || "-"}</td>
+                <td style={{ background: (!r.account || r.account === "Unassigned Account") ? "#fef3c7" : undefined }}>
+                  {r.account || <em style={{ color: "#ef4444" }}>Missing</em>}
+                </td>
+                <td style={{ background: !r.item ? "#fef3c7" : undefined }}>
+                  {r.item || <em style={{ color: "#ef4444" }}>Missing</em>}
+                </td>
+                <td>{r.qty || "-"}</td>
+                <td>{r.rate ? show(r.rate) : "-"}</td>
+                <td style={{ fontWeight: 600 }}>{r.total ? show(r.total) : "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {records.length > 20 && <p style={{ padding: "8px 16px", color: "var(--muted)", fontSize: 12 }}>Showing first 20 of {records.length} rows. Scroll to Audit tabs for full analysis.</p>}
+    </section>
+  );
+}
+
+// ─── AI CHAT WIDGET ──────────────────────────────────────────────────────────
+function AiChatWidget({ availableAccounts }) {
+  const [open, setOpen] = useState(false);
+  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || "" : ""));
+  const [showKeyInput, setShowKeyInput] = useState(false);
+  const [tempKey, setTempKey] = useState("");
+  const [input, setInput] = useState("");
+  const [history, setHistory] = useState([]); // [{role,content}]
+  const [loading, setLoading] = useState(false);
+  const messagesEndRef = typeof window !== "undefined" ? { current: null } : null;
+
+  const saveKey = () => {
+    setApiKey(tempKey);
+    if (typeof window !== "undefined") localStorage.setItem("groq_api_key", tempKey);
+    setShowKeyInput(false);
+  };
+
+  const sendMessage = async () => {
+    const msg = input.trim();
+    if (!msg || loading) return;
+    if (!apiKey) { setShowKeyInput(true); return; }
+
+    const newHistory = [...history, { role: "user", content: msg }];
+    setHistory(newHistory);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch("/api/ai-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: msg,
+          history: history.slice(-6),
+          availableAccounts,
+          apiKey
+        })
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      setHistory([...newHistory, { role: "assistant", content: data.reply }]);
+    } catch (e) {
+      setHistory([...newHistory, { role: "assistant", content: `⚠️ Error: ${e.message}` }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <>
+      {/* Floating toggle button */}
+      <button className="chat-fab" onClick={() => setOpen(o => !o)} title="AI Product Assistant">
+        {open ? "✕" : "🤖"}
+        {!open && <span className="chat-fab-label">AI Assistant</span>}
+      </button>
+
+      {/* Chat panel */}
+      {open && (
+        <div className="chat-panel">
+          <div className="chat-panel-header">
+            <div>
+              <strong>🤖 AI Product Assistant</strong>
+              <small>Paste any item name — I'll identify it & suggest the correct account</small>
+            </div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <button className="chat-key-btn" onClick={() => { setTempKey(apiKey); setShowKeyInput(true); }} title="Set Groq API Key">🔑</button>
+              <button className="chat-close-btn" onClick={() => setOpen(false)}>✕</button>
+            </div>
+          </div>
+
+          {showKeyInput && (
+            <div className="chat-key-bar">
+              <input
+                type="password"
+                placeholder="Paste your Groq API key (gsk_...)"
+                value={tempKey}
+                onChange={e => setTempKey(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && saveKey()}
+              />
+              <button onClick={saveKey}>Save</button>
+              <button onClick={() => setShowKeyInput(false)}>✕</button>
+            </div>
+          )}
+
+          <div className="chat-messages">
+            {history.length === 0 && (
+              <div className="chat-empty">
+                <p>👋 Hi! Paste any item name or ask me anything about restaurant accounting.</p>
+                <p style={{ marginTop: 8, fontSize: 12 }}>Examples:</p>
+                <div className="chat-examples">
+                  {["What is VANILLA 4LTR FD 368?","Is Monin Watermelon a beverage?","Which account for Classic Connect FTK?"].map(ex => (
+                    <button key={ex} onClick={() => setInput(ex)} className="chat-example-chip">{ex}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {history.map((m, i) => (
+              <div key={i} className={`chat-msg chat-msg-${m.role}`}>
+                <div className="chat-bubble">{m.content}</div>
+              </div>
+            ))}
+            {loading && (
+              <div className="chat-msg chat-msg-assistant">
+                <div className="chat-bubble chat-typing">⠋⠙⠹⠸ Thinking...</div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+
+          <div className="chat-input-row">
+            <input
+              type="text"
+              className="chat-input"
+              placeholder="Type item name or question..."
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
+              disabled={loading}
+            />
+            <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim()}>
+              {loading ? "…" : "↑"}
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 export default function Home() {
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
+  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || "" : ""));
+  const [showDataPreview, setShowDataPreview] = useState(false);
   const setT = (k, v) => setThresholds(t => ({ ...t, [k]: v }));
   const result = useMemo(() => current && previous ? analyse(current, previous, thresholds) : null, [current, previous, thresholds]);
   const upload = async (file, setter) => { try { setError(""); setter(await readFile(file)); } catch (e) { setError(e.message); } };
   const spend = x => x?.records.reduce((s, r) => s + r.total, 0) || 0;
   const total = result && (result.duplicates.length + result.vendors.length + result.items.length + result.prices.length + result.misclassifications.length);
+  const sharedAccounts = useMemo(() => current ? [...new Set(current.records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))] : [], [current]);
 
   return (
     <main>
@@ -873,9 +1058,12 @@ export default function Home() {
           <section className="run">
             <div>
               <strong>Analysis ready</strong>
-              <small>{current.name} compared with {previous.name}</small>
+              <small>{current.name} vs {previous.name}</small>
             </div>
-            <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); }}>New review</button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
+              <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
+            </div>
           </section>
 
           <section className="thresholds">
@@ -958,7 +1146,13 @@ export default function Home() {
           )}
 
           {tab === "Misclassifications" && (
-            <MisclassificationsView items={result.misclassifications} current={current} onGoToPivot={() => setTab("Account heads")} />
+            <MisclassificationsView
+              items={result.misclassifications}
+              current={current}
+              onGoToPivot={() => setTab("Account heads")}
+              sharedApiKey={apiKey}
+              sharedAccounts={sharedAccounts}
+            />
           )}
 
           {tab === "Account heads" && <AccountPivot current={current} />}
@@ -1000,6 +1194,24 @@ export default function Home() {
             </section>
           )}
         </>
+      )}
+
+      {/* Data preview modal */}
+      {current && showDataPreview && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, overflowY: "auto", padding: "40px 16px" }}>
+          <div style={{ maxWidth: 1100, margin: "0 auto", background: "var(--surface)", borderRadius: 12, overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+              <strong>Data Verification Preview</strong>
+              <button className="pivot-btn" onClick={() => setShowDataPreview(false)}>Close ✕</button>
+            </div>
+            <DataPreview data={current} />
+          </div>
+        </div>
+      )}
+
+      {/* AI Chat Widget — always visible when file loaded */}
+      {current && (
+        <AiChatWidget availableAccounts={sharedAccounts} />
       )}
     </main>
   );
