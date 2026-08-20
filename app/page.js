@@ -38,7 +38,7 @@ function Upload({ title, file, onChange, help }) { return <label className="uplo
 function Empty({children}) { return <p className="empty">{children}</p>; }
 function Table({head,children}) { return <div className="table"><table><thead><tr>{head.map(x=><th key={x}>{x}</th>)}</tr></thead><tbody>{children}</tbody></table></div>; }
 function ThresholdInput({label,value,onChange}) {
-  return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="1" max="100" value={value} onChange={e=>onChange(Math.max(1,Math.min(100,Number(e.target.value)||1))}/><span className="thresh-pct">%</span></div></label>;
+  return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="1" max="100" value={value} onChange={e=>onChange(Math.max(1,Math.min(100,Number(e.target.value)||1)))}/><span className="thresh-pct">%</span></div></label>;
 }
 export default function Home(){
   const [current,setCurrent]=useState(null),[previous,setPrevious]=useState(null),[error,setError]=useState(""),[tab,setTab]=useState("Overview");
