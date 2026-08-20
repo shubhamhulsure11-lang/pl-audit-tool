@@ -39,7 +39,7 @@ const RESTAURANT_TAXONOMY = [
       "blenders pride", "royal challenge", "royal stag", "imperial blue", "oakton",
       "vodka", "absolut", "smirnoff", "magic moments", "grey goose", "ciroc", "belvedere",
       "rum", "old monk", "bacardi", "captain morgan",
-      "gin", "bombay sapphire", "beefeater", "tanqueray", "gordons", "greater than gin", "hendricks",
+      "bombay sapphire", "beefeater", "tanqueray", "gordons", "greater than gin", "hendricks", "dry gin", "gin bottle",
       "tequila", "jose cuervo", "patron tequila", "don julio", "camino real", "sauza",
       "brandy", "mansion house", "cognac", "hennessy",
       "beer", "kingfisher", "budweiser", "corona beer", "bira", "heineken", "carlsberg", "tuborg",
@@ -59,7 +59,7 @@ const RESTAURANT_TAXONOMY = [
       "surmai", "kingfish", "pomfret", "white pomfret", "black pomfret",
       "rawas", "indian salmon", "salmon", "rohu", "katla", "tilapia",
       "tuna", "mackerel", "bangda", "hilsa", "bombil", "bombay duck",
-      "squid", "calamari", "octopus", "crab", "mud crab", "lobster", "clams", "oysters",
+      "squid", "calamari", "octopus", "mud crab", "fresh crab", "lobster", "clams", "oysters",
       "fish fillet", "fish curry cut"
     ]
   },
@@ -70,10 +70,10 @@ const RESTAURANT_TAXONOMY = [
     keywords: [
       "chicken breast", "chicken leg", "chicken drumstick", "chicken wings", "chicken keema",
       "chicken mince", "chicken curry cut", "chicken lollipop", "chicken liver", "boneless chicken",
-      "broiler chicken", "country chicken", "desi chicken", "whole chicken", "chicken",
+      "broiler chicken", "country chicken", "desi chicken", "whole chicken", "chicken meat",
       "mutton keema", "mutton curry cut", "mutton chops", "mutton boti", "mutton brain",
-      "lamb chops", "lamb shank", "goat meat", "mutton", "lamb",
-      "brown eggs", "white eggs", "quail eggs", "egg tray", "eggs", "egg",
+      "lamb chops", "lamb shank", "goat meat", "mutton meat", "lamb meat",
+      "brown eggs", "white eggs", "quail eggs", "egg tray", "eggs", "fresh egg",
       "beef", "pork", "bacon", "ham", "pepperoni"
     ]
   },
@@ -85,7 +85,7 @@ const RESTAURANT_TAXONOMY = [
       "real apple juice", "real mango juice", "real orange juice", "real cranberry", "real pineapple",
       "real litchi", "real juice", "tropicana", "minute maid", "raw pressery", "paper boat",
       "red bull", "redbull", "monster energy", "sting energy",
-      "tonic water", "schweppes tonic", "ginger ale", "club soda", "soda water", "lehar soda", "kinley soda",
+      "tonic water", "schweppes tonic", "ginger ale", "gin ale", "schw gin ale", "club soda", "soda water", "lehar soda", "kinley soda",
       "diet coke", "coke zero", "coca cola", "thums up", "limca", "sprite", "fanta", "mirinda", "mountain dew", "pepsi",
       "bisleri", "kinley water", "aquafina", "vedica", "himalayan water", "packaged water", "mineral water",
       "monin", "malas", "malass",
@@ -98,23 +98,24 @@ const RESTAURANT_TAXONOMY = [
   {
     id: "groceries",
     label: "Groceries",
-    aliases: ["grocer", "food and grocery", "food & grocery", "food purchase", "provision", "dry good", "raw material", "staple", "spices", "grain", "ingredients"],
+    aliases: ["grocer", "grocery", "provision", "dry good", "raw material", "staple", "spices", "grain", "ingredients"],
     keywords: [
       "sona masoori", "basmati rice", "kolam rice", "ponni rice", "rice", "basmati", "kolam",
       "wheat flour", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour",
       "cornstarch", "custard powder", "bread crumbs", "breadcrumbs",
       "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal",
-      "kabuli chana", "rajma", "soya chunks", "poha", "vermicelli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "dal", "lentil", "lentils",
+      "kabuli chana", "rajma", "soya chunks", "poha", "vermiceli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "dal", "lentil", "lentils",
       "garam masala", "chaat masala", "biryani masala", "kitchen king masala", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "red chilli powder", "kashmiri chilli", "degi mirch", "chili flakes",
       "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
       "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil", "cooking oil",
       "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee",
       "brown sugar", "jaggery", "gur", "honey", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg", "sugar", "salt",
-      "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan sauce", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri sauce", "ketchup", "vinegar",
+      "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan sauce", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri sauce", "ketchup", "vinegar", "wine vinegar", "cooking wine", "shao hsing",
       "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut", "black olive", "green olive", "stuffed olive", "olive slice",
+      "coconut milk powder", "coconut milk", "coconut cream", "maggi coconut",
       "cashew", "kaju", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
       "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla extract", "vanilla 4ltr", "food color", "food colouring",
-      "knorr chicken broth", "chicken broth", "chicken powder", "knorr", "broth powder", "bouillon", "seasoning powder"
+      "knorr chicken broth", "chicken broth", "chicken powder", "knorr", "broth powder", "bouillon", "seasoning powder", "crab cake mix"
     ]
   },
   {
@@ -123,7 +124,7 @@ const RESTAURANT_TAXONOMY = [
     aliases: ["dairy", "milk product"],
     keywords: [
       "toned milk", "full cream milk", "cow milk", "buffalo milk", "cottage cheese", "hung curd", "fresh cream", "amul cream", "sour cream", "whipped cream", "salted butter", "unsalted butter", "table butter", "mozzarella", "cheddar cheese", "cheese slice", "cheese block", "cream cheese",
-      "milk", "paneer", "curd", "dahi", "yogurt", "yoghurt", "cream", "butter", "cheese", "khoya", "mawa", "buttermilk", "chaas", "lassi"
+      "fresh milk", "paneer", "curd", "dahi", "yogurt", "yoghurt", "cream", "butter", "cheese", "khoya", "mawa", "buttermilk", "chaas", "lassi"
     ]
   },
   {
@@ -169,7 +170,8 @@ const RESTAURANT_TAXONOMY = [
       "paper plate", "disposable plate", "paper cup", "plastic glass", "disposable glass",
       "paper napkin", "cocktail napkin", "tissue paper", "tissue roll", "kitchen roll", "toilet roll", "tissue", "napkin",
       "aluminium foil", "silver foil", "cling wrap", "cling film", "butter paper", "parchment paper",
-      "paper straw", "plastic straw", "straw", "wooden spoon", "plastic spoon", "wooden fork", "plastic fork", "disposable cutlery", "chopstick", "chopsticks"
+      "paper straw", "plastic straw", "straw", "wooden spoon", "plastic spoon", "wooden fork", "plastic fork", "disposable cutlery", "chopstick", "chopsticks",
+      "banana leaf", "banana leaves", "patra", "serving leaf"
     ]
   },
   {
@@ -187,7 +189,7 @@ const RESTAURANT_TAXONOMY = [
     aliases: ["fruit", "fresh fruit"],
     keywords: [
       "sweet lime", "fresh mango", "blueberry fresh", "fresh strawberry",
-      "fresh apple", "seb", "banana", "kela", "fresh orange", "santra", "mosambi", "pomegranate", "anar", "fresh watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "fresh pineapple", "ananas", "aam", "grapes", "angoor", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
+      "fresh apple", "seb", "fresh banana", "kela", "fresh orange", "santra", "mosambi", "pomegranate", "anar", "fresh watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "fresh pineapple", "ananas", "aam", "grapes", "angoor", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
     ]
   },
   {
@@ -209,20 +211,21 @@ function cleanWords(str) {
 function accountMatchesCategory(actualAccount, category) {
   const normAcc = String(actualAccount || "").toLowerCase();
   
+  // Direct specific exclusions
+  if (category.id === "groceries" && normAcc.includes("sea food")) return false;
+  if (category.id === "groceries" && (normAcc.includes("poultry") || normAcc.includes("meat"))) return false;
+  if (category.id === "groceries" && normAcc.includes("dairy")) return false;
+  if (category.id === "beverages" && normAcc.includes("liquor")) return false;
+
   // Direct alias match
   if (category.aliases.some(alias => normAcc.includes(alias))) return true;
 
   // Cross-category allowances:
-  // e.g. Packing materials vs Packaging & Disposables (same category)
-  if (category.id === "packaging" && (normAcc.includes("pack") || normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
-  if (category.id === "cleaning" && (normAcc.includes("pack") || normAcc.includes("soap"))) return true;
-
-  // e.g. Kitchen utensils in cutlery, crockery, hotelware, equipment or kitchen
+  if (category.id === "packaging" && (normAcc.includes("pack") || normAcc.includes("clean") || normAcc.includes("housekeep") || normAcc.includes("disposab"))) return true;
+  if (category.id === "cleaning" && (normAcc.includes("pack") || normAcc.includes("soap") || normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
   if (category.id === "kitchen_tools" && (normAcc.includes("hotelware") || normAcc.includes("equipment") || normAcc.includes("kitchen") || normAcc.includes("crockery") || normAcc.includes("cutlery"))) return true;
-
-  // e.g. Vegetables & Fruits under Food / Groceries / Combined accounts
   if ((category.id === "vegetables" || category.id === "fruits") && (normAcc.includes("grocer") || normAcc.includes("food") || normAcc.includes("vegetable") || normAcc.includes("fruit") || normAcc.includes("tarkari"))) return true;
-  if (category.id === "groceries" && (normAcc.includes("food") || normAcc.includes("provision") || normAcc.includes("raw material"))) return true;
+  if (category.id === "groceries" && (normAcc.includes("grocer") || normAcc.includes("provision") || normAcc.includes("raw material"))) return true;
 
   return false;
 }
@@ -231,13 +234,18 @@ function accountMatchesCategory(actualAccount, category) {
 const VETO_RULES = [
   // Alcohol keywords block cigarette classification
   { blockedCategoryId: "cigarettes", ifItemContains: ["rum", "vodka", "whisky", "whiskey", "gin", "tequila", "brandy", "wine", "beer", "scotch", "bourbon", "liqueur", "bacardi", "smirnoff", "absolut"] },
-  // "soap" or "detergent" in item name blocks grocery oil match
-  { blockedCategoryId: "groceries", ifItemContains: ["soap", "detergent", "cleaner", "liquid soap", "dishwash"] },
-  // "monin" or "syrup" blocks fruit classification
-  { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial"] },
-  { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial"] },
-  // "broth", "powder", "seasoning", "cube", "bouillon", "knorr" in item blocks poultry (it's a grocery seasoning)
-  { blockedCategoryId: "poultry", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr"] },
+  // Non-alcoholic mixers block liquor classification
+  { blockedCategoryId: "liquor", ifItemContains: ["ale", "ginger ale", "gin ale", "tonic", "syrup", "essence", "non alcoholic", "non-alcoholic", "mocktail", "vinegar", "cooking wine"] },
+  // Soap / cleaning blocks grocery
+  { blockedCategoryId: "groceries", ifItemContains: ["soap", "detergent", "cleaner", "liquid soap", "dishwash", "hand wash"] },
+  // Syrups / leaves block fruit & vegetable
+  { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "leaf", "leaves", "patta", "patra"] },
+  { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "leaf", "leaves", "patta", "patra"] },
+  // Processed broth / seasonings / mixes block raw poultry & seafood
+  { blockedCategoryId: "poultry", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr", "mix", "curry paste"] },
+  { blockedCategoryId: "seafood", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr", "mix", "vinegar", "sauce", "cake mix"] },
+  // Plant-based milks block dairy
+  { blockedCategoryId: "dairy", ifItemContains: ["coconut milk", "coconut", "almond milk", "soy milk", "soya milk", "oat milk", "plant milk", "milk powder"] },
 ];
 
 function isVetoed(categoryId, itemNorm) {
@@ -259,15 +267,12 @@ function classifyItem(itemName) {
   let maxKeywordLen = 0;
 
   for (const cat of RESTAURANT_TAXONOMY) {
-    // Skip this category if a veto rule blocks it for this item
     if (isVetoed(cat.id, norm)) continue;
 
     for (const kw of cat.keywords) {
       const normKw = cleanWords(kw);
       if (!normKw) continue;
 
-      // Strict matching: keyword must match as complete whole words
-      // e.g. "classic bt" will NOT match "Bacardi Classic" since "classic" alone is no longer a keyword
       const escaped = normKw.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
       const wordRegex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i");
 
@@ -286,10 +291,56 @@ function classifyItem(itemName) {
 function detectMisclassifications(records) {
   if (!records || !records.length) return [];
   
-  // Find all distinct account names in this sheet to suggest the exact sheet account name when possible
   const sheetAccounts = [...new Set(records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))];
+  
   const findBestSheetAccountName = (category) => {
-    const matched = sheetAccounts.find(acc => category.aliases.some(alias => acc.toLowerCase().includes(alias)));
+    const cid = category.id;
+    if (cid === "groceries") {
+      const match = sheetAccounts.find(a => /grocer/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "seafood") {
+      const match = sheetAccounts.find(a => /sea\s*food|fish|prawn/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "poultry") {
+      const match = sheetAccounts.find(a => /poultry|meat|chicken|mutton/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "dairy") {
+      const match = sheetAccounts.find(a => /dairy|milk/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "beverages") {
+      const match = sheetAccounts.find(a => /beverage|soft\s*drink/i.test(a) && !/liquor|alcohol|wine|beer/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "liquor") {
+      const match = sheetAccounts.find(a => /liquor|alcohol|wine|beer|spirit/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "packaging") {
+      const match = sheetAccounts.find(a => /pack|disposab/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "cleaning") {
+      const match = sheetAccounts.find(a => /clean|housekeep/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "vegetables" || cid === "fruits") {
+      const match = sheetAccounts.find(a => /vegetable|fruit/i.test(a));
+      if (match) return match;
+    }
+    if (cid === "cigarettes") {
+      const match = sheetAccounts.find(a => /cigarette|tobacco|smoke/i.test(a));
+      if (match) return match;
+    }
+
+    const matched = sheetAccounts.find(acc => {
+      const normA = acc.toLowerCase();
+      if (cid === "groceries" && normA.includes("sea food")) return false;
+      return category.aliases.some(alias => normA.includes(alias));
+    });
     return matched || category.label;
   };
 
