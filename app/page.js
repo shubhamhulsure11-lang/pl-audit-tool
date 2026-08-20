@@ -211,7 +211,12 @@ function cleanWords(str) {
 function accountMatchesCategory(actualAccount, category) {
   const normAcc = String(actualAccount || "").toLowerCase();
   
-  // Direct specific exclusions
+  // STAFF WELFARE / ENTERTAINMENT — any food item (raw or cooked) bought under
+  // these accounts is a legitimate expense. Never flag them as mis-classified.
+  const isStaffOrExpense = /staff\s*(welfare|food|meal|expense)|entertainment|business\s*meal|petty\s*cash|general\s*expense/i.test(normAcc);
+  if (isStaffOrExpense && ["seafood","poultry","groceries","beverages","dairy","vegetables","fruits","liquor"].includes(category.id)) return true;
+
+  // Direct specific exclusions — stop wrong cross-category matches
   if (category.id === "groceries" && normAcc.includes("sea food")) return false;
   if (category.id === "groceries" && (normAcc.includes("poultry") || normAcc.includes("meat"))) return false;
   if (category.id === "groceries" && normAcc.includes("dairy")) return false;
@@ -224,7 +229,10 @@ function accountMatchesCategory(actualAccount, category) {
   if (category.id === "packaging" && (normAcc.includes("pack") || normAcc.includes("clean") || normAcc.includes("housekeep") || normAcc.includes("disposab"))) return true;
   if (category.id === "cleaning" && (normAcc.includes("pack") || normAcc.includes("soap") || normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
   if (category.id === "kitchen_tools" && (normAcc.includes("hotelware") || normAcc.includes("equipment") || normAcc.includes("kitchen") || normAcc.includes("crockery") || normAcc.includes("cutlery"))) return true;
-  if ((category.id === "vegetables" || category.id === "fruits") && (normAcc.includes("grocer") || normAcc.includes("food") || normAcc.includes("vegetable") || normAcc.includes("fruit") || normAcc.includes("tarkari"))) return true;
+  // Vegetables & fruits ONLY accepted in groceries/food if caller explicitly opts in (opts.allowVegInGrocery)
+  // This is set to true in detectMisclassifications when the file has NO separate vegetable account.
+  if ((category.id === "vegetables" || category.id === "fruits") &&
+      (normAcc.includes("vegetable") || normAcc.includes("fruit") || normAcc.includes("tarkari"))) return true;
   if (category.id === "groceries" && (normAcc.includes("grocer") || normAcc.includes("provision") || normAcc.includes("raw material"))) return true;
 
   return false;
@@ -238,9 +246,11 @@ const VETO_RULES = [
   { blockedCategoryId: "liquor", ifItemContains: ["ale", "ginger ale", "gin ale", "tonic", "syrup", "essence", "non alcoholic", "non-alcoholic", "mocktail", "vinegar", "cooking wine"] },
   // Soap / cleaning blocks grocery
   { blockedCategoryId: "groceries", ifItemContains: ["soap", "detergent", "cleaner", "liquid soap", "dishwash", "hand wash"] },
-  // Syrups / leaves block fruit & vegetable
-  { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "leaf", "leaves", "patta", "patra"] },
-  { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "leaf", "leaves", "patta", "patra"] },
+  // Syrups & cordials block fruit & vegetable — but NOT "leaf"/"leaves"/"patta" because
+  // curry leaves, coriander leaves, mint leaves, kadi patta are VALID vegetables.
+  // Only banana leaves / serving leaves / patra (lotus leaf) should be blocked (they're packing).
+  { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "patra"] },
+  { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "patra", "banana leaf", "banana leaves"] },
   // Processed broth / seasonings / mixes block raw poultry & seafood
   { blockedCategoryId: "poultry", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr", "mix", "curry paste"] },
   { blockedCategoryId: "seafood", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr", "mix", "vinegar", "sauce", "cake mix"] },
@@ -346,6 +356,9 @@ function detectMisclassifications(records) {
 
   const map = new Map();
 
+  // Context: does this file have a dedicated vegetables/fruits account?
+  const hasVegAccount = sheetAccounts.some(a => /vegetable|fruit|sabzi|tarkari/i.test(a));
+
   records.forEach(r => {
     if (!r.item || !r.account || r.account === "Unassigned Account") return;
     const match = classifyItem(r.item);
@@ -356,6 +369,13 @@ function detectMisclassifications(records) {
     const isCorrect = accountMatchesCategory(r.account, expectedCat);
 
     if (!isCorrect) {
+      // Smart skip: if no separate veg/fruit account exists, booking them in Groceries/Food is acceptable
+      if (!hasVegAccount &&
+          (expectedCat.id === "vegetables" || expectedCat.id === "fruits") &&
+          /grocer|provision|raw material|food/i.test(r.account.toLowerCase())) {
+        return;
+      }
+
       const suggestedName = findBestSheetAccountName(expectedCat);
       const key = `${r.item}:::${r.vendor}:::${r.account}:::${expectedCat.id}`;
       if (!map.has(key)) {
@@ -1280,7 +1300,17 @@ export default function Home() {
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
   const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || "" : ""));
-  const [groqModel, setGroqModel] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_model") || "" : ""));
+  const [groqModel, setGroqModel] = useState(() => {
+    if (typeof window === "undefined") return "";
+    const stored = localStorage.getItem("groq_model") || "";
+    // Auto-clear reasoning/experimental models — they leak <think> tokens
+    const BAD_PATTERNS = ["qwen", "deepseek", "r1", "think", "reasoning", "preview", "canopy", "orpheus", "arabic", "distil", "vision", "guard", "speculative", "whisper", "tts", "embed", "openai"];
+    if (stored && BAD_PATTERNS.some(p => stored.toLowerCase().includes(p))) {
+      localStorage.removeItem("groq_model");
+      return "";
+    }
+    return stored;
+  });
   const [showAiSetup, setShowAiSetup] = useState(false);
   const [showDataPreview, setShowDataPreview] = useState(false);
 

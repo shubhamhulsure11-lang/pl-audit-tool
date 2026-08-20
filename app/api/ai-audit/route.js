@@ -89,13 +89,11 @@ If WRONG: {"ok":false,"suggest":"exact name from Available Account Heads","why":
       const result = JSON.parse(text);
       return NextResponse.json({ success: true, result, model });
     } catch {
-      // If parsing fails, report the error so the UI does not show false positive
+      // Parse failed — do NOT fake success. Return error so UI shows ⚠️.
+      const snippet = text ? text.slice(0, 120).replace(/\n/g, " ") : "(empty)";
       return NextResponse.json({
-        success: true,
-        result: { ok: true, why: "AI response received" },
-        model,
-        rawText: text
-      });
+        error: `AI returned non-JSON output. Try a different model in ⚙️ AI Setup. Snippet: "${snippet}"`
+      }, { status: 422 });
     }
   } catch (err) {
     return NextResponse.json({ error: err.message || "Internal error" }, { status: 500 });
