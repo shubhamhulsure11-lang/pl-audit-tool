@@ -1,15 +1,36 @@
 import { NextResponse } from "next/server";
 
-const GROQ_MODELS = [
-  "llama-3.3-70b-versatile",
-  "llama3-70b-8192",
-  "llama-3.1-70b-versatile",
-  "llama-3.1-8b-instant",
-  "llama3-8b-8192",
-  "mixtral-8x7b-32768",
-  "gemma2-9b-it",
-  "gemma-7b-it"
+// Preferred model substrings in order of quality
+const MODEL_PREFERENCES = [
+  "llama-3.3",
+  "llama-3.1-70b",
+  "llama3-70b",
+  "llama-3.1",
+  "llama3",
+  "mixtral",
+  "gemma2",
+  "gemma",
 ];
+
+async function pickBestGroqModel(apiKey) {
+  try {
+    const res = await fetch("https://api.groq.com/openai/v1/models", {
+      headers: { Authorization: `Bearer ${apiKey}` }
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const ids = (data.data || []).map((m) => m.id);
+
+    for (const pref of MODEL_PREFERENCES) {
+      const found = ids.find((id) => id.toLowerCase().includes(pref));
+      if (found) return found;
+    }
+    // Fallback: first available model
+    return ids[0] || null;
+  } catch {
+    return null;
+  }
+}
 
 export async function POST(req) {
   try {
@@ -28,6 +49,15 @@ export async function POST(req) {
       return NextResponse.json({ error: "No items provided for analysis." }, { status: 400 });
     }
 
+    // Auto-discover the best available model for this API key
+    const model = await pickBestGroqModel(apiKey);
+    if (!model) {
+      return NextResponse.json(
+        { error: "Could not find any available Groq model for your API key. Please verify the key at console.groq.com." },
+        { status: 400 }
+      );
+    }
+
     const itemsToAudit = items.slice(0, 30);
 
     const systemPrompt = `You are an expert restaurant accounting auditor in India. Your job is to identify misclassified purchase items in a restaurant's Zoho Books accounts.
@@ -39,75 +69,47 @@ RESTAURANT ACCOUNTING RULES:
 4. Sea food purchases: Fish (Basa, Surmai, Pomfret, Rawas, Salmon, Tuna), Prawns (any size like 16/20, 21/25), Shrimp, Crab, Lobster, Squid, Octopus.
 5. Beverages: Non-alcoholic ONLY — Red Bull, energy drinks, Tonic Water, Diet Coke, Sodas, Real Juices, Fruit Syrups like Monin/Malas, Packaged Mineral Water, Limca, Sprite, Thums Up, Tea, Coffee, Kokum, Sharbat.
 6. Liquor Purchases: Alcoholic beverages ONLY — Wine, Beer, Whisky, Vodka, Rum, Gin, Tequila, Brandy, Champagne, Shiraz, Cabernet, Sauvignon, Scotch, Bourbon, Sake, Mead. NOT beverages.
-7. Cigarette purchases: Cigarettes and tobacco — Classic Connect, Classic Regular, Classic Milds, Ice Burst, Marlboro, Gold Flake, Wills Navy Cut, Beedi, Hookah tobacco. NOT groceries or beverages.
-8. Other Purchases: Charcoal, Coal, Ice cubes, Ice slabs, Dry ice, wooden skewers, toothpicks, match boxes, lighters.
-9. Packing materials / Packaging & Disposables: Both names mean EXACTLY the same thing. Meal trays, takeaway boxes, paper bags, tissues, napkins, aluminium foil, cling wrap, straws, disposable plates, disposable cutlery, zip-lock bags, kraft boxes.
-10. Cleaning and housekeeping: Dishwash liquid, detergents, floor cleaners (Lizol, Phenyl, Domex), Colin, Harpic, bleach, sanitizers, brooms, mops, wipers, scrubbers, garbage bags, gloves.
-11. Kitchen tools: Katoris, utensils, kadai, tawa, knives, chopping boards, strainers, ladles, crockery, hotelware, cocktail shakers, jiggers, shot glasses, bar tools.
+7. Cigarette purchases: Cigarettes and tobacco — Classic Connect, Classic Regular, Classic Milds, Ice Burst, Marlboro, Gold Flake, Wills Navy Cut, Beedi, Hookah tobacco.
+8. Other Purchases: Charcoal, Coal, Ice cubes, Ice slabs, Dry ice, wooden skewers, toothpicks.
+9. Packing materials / Packaging & Disposables: Both names are the SAME category. Meal trays, takeaway boxes, paper bags, tissues, napkins, aluminium foil, cling wrap, straws, disposable plates/cutlery.
+10. Cleaning and housekeeping: Dishwash liquid, detergents, floor cleaners (Lizol, Phenyl, Domex), Colin, Harpic, bleach, sanitizers, brooms, mops, garbage bags.
+11. Kitchen tools: Utensils, kadai, tawa, knives, chopping boards, crockery, hotelware, cocktail shakers.
 12. Stationery & Office: Registers, KOT books, bill books, pens, POS rolls, thermal paper, toners.
 
-When you see an item name that looks like a product code, abbreviation, or SKU — reason about what it likely is based on the vendor name and context.
-
-You MUST return ONLY valid JSON — no explanation, no markdown fences, no extra text. Just the raw JSON array.`;
+You MUST return ONLY valid JSON — no explanation, no markdown, no extra text. Just the raw JSON array.`;
 
     const userMessage = `Evaluate these items for misclassification.
 AVAILABLE ACCOUNT HEADS: ${(availableAccounts || []).join(", ")}
 ITEMS: ${JSON.stringify(itemsToAudit, null, 2)}
 
 Return a JSON array of ONLY misclassified items. If nothing is wrong, return [].
-Format: [{"item":"...","vendor":"...","actualAccount":"...","suggestedAccount":"one of the AVAILABLE ACCOUNT HEADS","isMisclassified":true,"webSummary":"what product this actually is","reason":"why this account head is wrong"}]`;
+Format: [{"item":"...","vendor":"...","actualAccount":"...","suggestedAccount":"one of the AVAILABLE ACCOUNT HEADS","isMisclassified":true,"webSummary":"what this product actually is","reason":"why the current account head is wrong"}]`;
 
-    let groqData = null;
-    let lastError = "";
+    const groqRes = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user", content: userMessage }
+        ],
+        temperature: 0.1,
+        max_tokens: 4096
+      })
+    });
 
-    for (const model of GROQ_MODELS) {
-      let res;
-      try {
-        res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${apiKey}`
-          },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: "system", content: systemPrompt },
-              { role: "user", content: userMessage }
-            ],
-            temperature: 0.1,
-            max_tokens: 4096
-          })
-        });
-      } catch (fetchErr) {
-        lastError = fetchErr.message;
-        continue;
-      }
-
-      if (res.ok) {
-        groqData = await res.json();
-        break;
-      }
-
-      const errText = await res.text();
-      try {
-        const parsed = JSON.parse(errText);
-        lastError = parsed?.error?.message || `HTTP ${res.status}`;
-      } catch {
-        lastError = `HTTP ${res.status}`;
-      }
-
-      // Stop looping on auth errors
-      if (res.status === 401 || res.status === 403) break;
+    if (!groqRes.ok) {
+      const errText = await groqRes.text();
+      let errMsg = `Groq API error (${groqRes.status})`;
+      try { errMsg = JSON.parse(errText)?.error?.message || errMsg; } catch { /* ignore */ }
+      return NextResponse.json({ error: errMsg }, { status: groqRes.status });
     }
 
-    if (!groqData) {
-      return NextResponse.json(
-        { error: lastError || "No Groq model available for your account. Please verify your API key at console.groq.com." },
-        { status: 400 }
-      );
-    }
-
+    const groqData = await groqRes.json();
     const text = (groqData.choices?.[0]?.message?.content || "").trim();
 
     let jsonStr = text;
@@ -124,7 +126,7 @@ Format: [{"item":"...","vendor":"...","actualAccount":"...","suggestedAccount":"
       return NextResponse.json({ rawText: text, error: "Failed to parse AI response as JSON", parsed: [] });
     }
 
-    return NextResponse.json({ success: true, results: parsed });
+    return NextResponse.json({ success: true, results: parsed, modelUsed: model });
   } catch (err) {
     return NextResponse.json({ error: err.message || "Internal server error" }, { status: 500 });
   }
