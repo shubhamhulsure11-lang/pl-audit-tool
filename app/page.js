@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
@@ -412,19 +412,18 @@ function ThresholdInput({ label, value, onChange, maxVal = 100 }) {
   return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="0" max={maxVal} value={value} onChange={e => onChange(Math.max(0, Math.min(maxVal, e.target.value === "" ? 0 : Number(e.target.value) || 0)))} /><span className="thresh-pct">%</span></div></label>;
 }
 
-function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sharedAccounts }) {
+function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sharedModel, onOpenSetup, sharedAccounts }) {
   const [q, setQ] = useState("");
-  const apiKey = sharedApiKey;
-  const [rowAiState, setRowAiState] = useState({}); // { [itemKey]: { loading, result, error } }
+  const [rowAiState, setRowAiState] = useState({}); // { [itemKey]: { loading, result, error, countdown } }
   const [aiResults, setAiResults] = useState([]);
 
   const askAiForRow = async (x) => {
     const rowKey = `${x.item}:::${x.vendor}`;
-    if (!apiKey) {
-      alert("Please add your Groq API key using the 🔑 button in the bottom-right chat widget.");
+    if (!sharedApiKey || !sharedModel) {
+      onOpenSetup();
       return;
     }
-    setRowAiState(prev => ({ ...prev, [rowKey]: { loading: true, result: null, error: null } }));
+    setRowAiState(prev => ({ ...prev, [rowKey]: { loading: true, result: null, error: null, countdown: 0 } }));
     try {
       const res = await fetch("/api/ai-audit", {
         method: "POST",
@@ -432,27 +431,68 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
         body: JSON.stringify({
           singleItem: { item: x.item, vendor: x.vendor, actualAccount: x.actualAccount },
           availableAccounts: sharedAccounts,
-          apiKey
+          apiKey: sharedApiKey,
+          model: sharedModel
         })
       });
       const data = await res.json();
+
+      if (res.status === 429) {
+        const secs = data.retryAfter || 30;
+        setRowAiState(prev => ({
+          ...prev,
+          [rowKey]: { loading: false, result: null, error: `Rate limited. Retry in ${secs}s`, countdown: secs }
+        }));
+        // Countdown timer
+        let rem = secs;
+        const iv = setInterval(() => {
+          rem -= 1;
+          if (rem <= 0) {
+            clearInterval(iv);
+            setRowAiState(prev => ({
+              ...prev,
+              [rowKey]: { loading: false, result: null, error: null, countdown: 0 }
+            }));
+          } else {
+            setRowAiState(prev => ({
+              ...prev,
+              [rowKey]: { ...prev[rowKey], countdown: rem, error: `Retry in ${rem}s` }
+            }));
+          }
+        }, 1000);
+        return;
+      }
+
       if (!res.ok || data.error) throw new Error(data.error || "AI error");
-      setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: data.result, error: null } }));
-      if (data.result?.isMisclassified) {
+
+      const resObj = data.result || {};
+      const isMis = resObj.ok === false;
+      setRowAiState(prev => ({
+        ...prev,
+        [rowKey]: {
+          loading: false,
+          result: { isMisclassified: isMis, suggestedAccount: resObj.suggest, why: resObj.why },
+          error: null,
+          countdown: 0
+        }
+      }));
+
+      if (isMis && resObj.suggest) {
         setAiResults(prev => {
           const existing = prev.findIndex(r => r.item === x.item && r.vendor === x.vendor);
           const entry = {
-            ...x, isAi: true,
-            suggestedAccount: data.result.suggestedAccount || x.suggestedAccount,
-            matchedKeyword: data.result.webSummary || "AI Analysis",
-            reason: data.result.reason || x.reason
+            ...x,
+            isAi: true,
+            suggestedAccount: resObj.suggest,
+            matchedKeyword: resObj.why || "AI Verified",
+            reason: resObj.why || x.reason
           };
           if (existing >= 0) { const next = [...prev]; next[existing] = entry; return next; }
           return [...prev, entry];
         });
       }
     } catch (e) {
-      setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: null, error: e.message } }));
+      setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: null, error: e.message, countdown: 0 } }));
     }
   };
 
@@ -497,11 +537,12 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
       <div className="misclass-info-banner">
         <span>🔬</span>
         <div style={{ flex: 1 }}>
-          <strong>Dual-Layer Audit:</strong> Rule engine flags high-confidence misclassifications. Click <strong>🤖 Ask AI</strong> on any row to get a second AI opinion on that specific item — uses your Groq key from the chat widget.
+          <strong>Dual-Layer Audit:</strong> High-confidence rule engine runs instantly. Click <strong>🤖 Ask AI</strong> on any row for an instant AI second-opinion using <strong>{sharedModel || "your configured Groq model"}</strong>.
         </div>
-        <button className="pivot-btn" onClick={onGoToPivot} style={{ whiteSpace: "nowrap" }}>
-          View Account Pivot &rarr;
-        </button>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="pivot-btn" onClick={onOpenSetup}>⚙️ AI Config</button>
+          <button className="pivot-btn" onClick={onGoToPivot} style={{ whiteSpace: "nowrap" }}>View Pivot &rarr;</button>
+        </div>
       </div>
 
       <div className="pivot-toolbar">
@@ -518,7 +559,7 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
         </div>
       </div>
 
-      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Detection / AI Summary", "Amount", "AI Check"]}>
+      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Detection / AI Reason", "Amount", "AI Check"]}>
         {filtered.length ? filtered.map((x, i) => {
           const rowKey = `${x.item}:::${x.vendor}`;
           const rowAi = rowAiState[rowKey];
@@ -528,24 +569,26 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
                 <div style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</div>
                 {x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
                 {rowAi?.result && !rowAi.result.isMisclassified && (
-                  <small style={{ color: "#16a34a", display: "block", marginTop: "3px", fontSize: "11px" }}>✅ AI: Correctly classified</small>
+                  <small style={{ color: "#16a34a", display: "block", marginTop: "3px", fontSize: "11px", fontWeight: 600 }}>✅ AI: Correctly booked</small>
                 )}
                 {rowAi?.error && (
-                  <small style={{ color: "#dc2626", display: "block", marginTop: "3px", fontSize: "10px" }}>⚠ {rowAi.error}</small>
+                  <small style={{ color: rowAi.countdown > 0 ? "#b45309" : "#dc2626", display: "block", marginTop: "3px", fontSize: "11px" }}>
+                    {rowAi.countdown > 0 ? `⏳ ${rowAi.error}` : `⚠ ${rowAi.error}`}
+                  </small>
                 )}
               </td>
               <td>{x.vendor}</td>
               <td><span className="pill-actual-acc">{x.actualAccount}</span></td>
               <td>
-                {rowAi?.result?.isMisclassified ? (
+                {rowAi?.result?.isMisclassified && rowAi.result.suggestedAccount ? (
                   <span className="pill-suggested-acc">🤖 {rowAi.result.suggestedAccount}</span>
                 ) : (
                   <span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span>
                 )}
               </td>
               <td>
-                {rowAi?.result?.webSummary ? (
-                  <span className="pill-ai-badge">🤖 {rowAi.result.webSummary}</span>
+                {rowAi?.result?.why ? (
+                  <span className="pill-ai-badge">🤖 {rowAi.result.why}</span>
                 ) : x.isAi ? (
                   <span className="pill-ai-badge">🤖 {x.matchedKeyword}</span>
                 ) : (
@@ -555,12 +598,12 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
               <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)", whiteSpace: "nowrap" }}>{show(x.total)}</td>
               <td>
                 <button
-                  className="ask-ai-row-btn"
+                  className={`ask-ai-row-btn ${rowAi?.countdown > 0 ? "rate-limited" : ""}`}
                   onClick={() => askAiForRow(x)}
-                  disabled={rowAi?.loading}
-                  title="Ask AI about this item"
+                  disabled={rowAi?.loading || rowAi?.countdown > 0}
+                  title={rowAi?.countdown > 0 ? `Rate limited, retry in ${rowAi.countdown}s` : `Ask AI (${sharedModel || "Setup AI"})`}
                 >
-                  {rowAi?.loading ? "..." : "🤖"}
+                  {rowAi?.loading ? "..." : rowAi?.countdown > 0 ? `${rowAi.countdown}s` : "🤖"}
                 </button>
               </td>
             </tr>
@@ -885,27 +928,189 @@ function DataPreview({ data }) {
   );
 }
 
-// ─── AI CHAT WIDGET ──────────────────────────────────────────────────────────
-function AiChatWidget({ availableAccounts }) {
-  const [open, setOpen] = useState(false);
-  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || "" : ""));
-  const [showKeyInput, setShowKeyInput] = useState(false);
-  const [tempKey, setTempKey] = useState("");
-  const [input, setInput] = useState("");
-  const [history, setHistory] = useState([]); // [{role,content}]
+// ─── AI SETUP MODAL ──────────────────────────────────────────────────────────
+function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
+  const [step, setStep] = useState("key"); // "key" | "model" | "testing" | "configured"
+  const [keyInput, setKeyInput] = useState(apiKey || "");
+  const [selectedModel, setSelectedModel] = useState(model || "");
+  const [availableModels, setAvailableModels] = useState([]);
   const [loading, setLoading] = useState(false);
-  const messagesEndRef = typeof window !== "undefined" ? { current: null } : null;
+  const [error, setError] = useState("");
 
-  const saveKey = () => {
-    setApiKey(tempKey);
-    if (typeof window !== "undefined") localStorage.setItem("groq_api_key", tempKey);
-    setShowKeyInput(false);
+  useEffect(() => {
+    setKeyInput(apiKey || "");
+    setSelectedModel(model || "");
+    if (apiKey && model) setStep("configured");
+    else setStep("key");
+    setError("");
+  }, [isOpen, apiKey, model]);
+
+  const fetchModels = async (overrideKey) => {
+    const key = overrideKey || keyInput.trim();
+    if (!key) { setError("Please enter your Groq API key (starts with gsk_...)"); return; }
+    setError("");
+    setLoading(true);
+    try {
+      const res = await fetch("/api/groq-models", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: key })
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to connect to Groq");
+      const models = data.models || [];
+      if (!models.length) throw new Error("No chat models found for this key.");
+      setAvailableModels(models);
+      const choice = (model && models.includes(model)) ? model : models[0];
+      setSelectedModel(choice);
+      setStep("model");
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  const testAndSave = async () => {
+    if (!selectedModel) { setError("Please choose a model"); return; }
+    setLoading(true);
+    setError("");
+    setStep("testing");
+    try {
+      const res = await fetch("/api/ai-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          singleItem: { item: "Amul Butter 500g", vendor: "Amul Store", actualAccount: "Dairy" },
+          availableAccounts: ["Dairy", "Groceries"],
+          apiKey: keyInput.trim(),
+          model: selectedModel
+        })
+      });
+      const data = await res.json();
+      if (res.status === 429) {
+        throw new Error(`Rate limit hit on Groq (${data.retryAfter || 30}s). Try 'llama-3.1-8b-instant' which has a higher quota.`);
+      }
+      if (!res.ok || data.error) throw new Error(data.error || "Model test failed");
+      onSave(keyInput.trim(), selectedModel);
+      setStep("configured");
+    } catch (e) {
+      setError(e.message);
+      setStep("model");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="setup-overlay">
+      <div className="setup-modal">
+        <div className="setup-modal-header">
+          <strong>⚙️ AI Setup & Configuration</strong>
+          <button className="setup-close-btn" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="setup-body">
+          {step === "key" && (
+            <>
+              <p className="setup-desc">
+                Paste your free Groq API key. If you need one, create it for free at <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>.
+              </p>
+              <label className="setup-label">Groq API Key</label>
+              <input
+                type="password"
+                className="setup-input"
+                placeholder="gsk_..."
+                value={keyInput}
+                onChange={e => setKeyInput(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && fetchModels()}
+              />
+              {error && <div className="setup-error"><span>⚠</span> {error}</div>}
+              <div className="setup-actions">
+                <button className="btn-cancel" onClick={onClose}>Cancel</button>
+                <button className="btn-save" onClick={() => fetchModels()} disabled={loading || !keyInput.trim()}>
+                  {loading ? "Checking..." : "Next: Choose Model →"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {step === "model" && (
+            <>
+              <p className="setup-desc">
+                Choose the model from your active Groq account to use for audit reviews and chat:
+              </p>
+              <label className="setup-label">Available Models for your Key</label>
+              <select
+                className="setup-select"
+                value={selectedModel}
+                onChange={e => setSelectedModel(e.target.value)}
+              >
+                {availableModels.map(m => (
+                  <option key={m} value={m}>
+                    {m} {m.includes("instant") ? "⚡ (Recommended — Fast & High Quota)" : m.includes("70b") ? "🧠 (Deep Accuracy)" : ""}
+                  </option>
+                ))}
+              </select>
+
+              <div className="model-info-box">
+                <strong>Tip for Free Tier</strong>
+                <code>llama-3.1-8b-instant</code> offers the best performance with high free tokens-per-minute limits.
+              </div>
+
+              {error && <div className="setup-error"><span>⚠</span> {error}</div>}
+
+              <div className="setup-actions">
+                <button className="btn-cancel" onClick={() => setStep("key")}>← Change Key</button>
+                <button className="btn-save" onClick={testAndSave} disabled={loading || !selectedModel}>
+                  {loading ? "Testing..." : "Test & Save Config →"}
+                </button>
+              </div>
+            </>
+          )}
+
+          {step === "testing" && (
+            <div className="setup-testing">
+              <span className="setup-spinner">⚙️</span>
+              <p>Testing connection with <strong>{selectedModel}</strong>...</p>
+            </div>
+          )}
+
+          {step === "configured" && (
+            <div className="setup-success">
+              <span className="setup-success-icon">✅</span>
+              <h4>AI Configured & Ready</h4>
+              <p>Active Model: <strong>{model || selectedModel}</strong></p>
+              <div className="setup-actions" style={{ marginTop: 16 }}>
+                <button className="btn-cancel" onClick={() => fetchModels(apiKey)}>Change Model</button>
+                <button className="btn-save" onClick={onClose}>Done</button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── AI CHAT WIDGET ──────────────────────────────────────────────────────────
+function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
+  const [open, setOpen] = useState(false);
+  const [input, setInput] = useState("");
+  const [history, setHistory] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [chatCountdown, setChatCountdown] = useState(0);
+  const messagesEndRef = typeof window !== "undefined" ? { current: null } : null;
 
   const sendMessage = async () => {
     const msg = input.trim();
-    if (!msg || loading) return;
-    if (!apiKey) { setShowKeyInput(true); return; }
+    if (!msg || loading || chatCountdown > 0) return;
+    if (!apiKey || !model) {
+      onOpenSetup();
+      return;
+    }
 
     const newHistory = [...history, { role: "user", content: msg }];
     setHistory(newHistory);
@@ -918,12 +1123,27 @@ function AiChatWidget({ availableAccounts }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: msg,
-          history: history.slice(-6),
+          history: history.slice(-4),
           availableAccounts,
-          apiKey
+          apiKey,
+          model
         })
       });
       const data = await res.json();
+
+      if (res.status === 429) {
+        const secs = data.retryAfter || 30;
+        setChatCountdown(secs);
+        setHistory([...newHistory, { role: "assistant", content: `⏳ Rate limit reached. Please wait ${secs}s before asking again.` }]);
+        let rem = secs;
+        const iv = setInterval(() => {
+          rem -= 1;
+          if (rem <= 0) { clearInterval(iv); setChatCountdown(0); }
+          else setChatCountdown(rem);
+        }, 1000);
+        return;
+      }
+
       if (data.error) throw new Error(data.error);
       setHistory([...newHistory, { role: "assistant", content: data.reply }]);
     } catch (e) {
@@ -935,47 +1155,38 @@ function AiChatWidget({ availableAccounts }) {
 
   return (
     <>
-      {/* Floating toggle button */}
       <button className="chat-fab" onClick={() => setOpen(o => !o)} title="AI Product Assistant">
         {open ? "✕" : "🤖"}
         {!open && <span className="chat-fab-label">AI Assistant</span>}
       </button>
 
-      {/* Chat panel */}
       {open && (
         <div className="chat-panel">
           <div className="chat-panel-header">
             <div>
-              <strong>🤖 AI Product Assistant</strong>
-              <small>Paste any item name — I'll identify it & suggest the correct account</small>
+              <strong>🤖 AI Assistant</strong>
+              <small>{model ? `Using ${model}` : "Click ⚙️ to configure Groq"}</small>
             </div>
             <div style={{ display: "flex", gap: 6 }}>
-              <button className="chat-key-btn" onClick={() => { setTempKey(apiKey); setShowKeyInput(true); }} title="Set Groq API Key">🔑</button>
+              <button className="chat-key-btn" onClick={onOpenSetup} title="Configure AI Key & Model">⚙️</button>
               <button className="chat-close-btn" onClick={() => setOpen(false)}>✕</button>
             </div>
           </div>
 
-          {showKeyInput && (
-            <div className="chat-key-bar">
-              <input
-                type="password"
-                placeholder="Paste your Groq API key (gsk_...)"
-                value={tempKey}
-                onChange={e => setTempKey(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && saveKey()}
-              />
-              <button onClick={saveKey}>Save</button>
-              <button onClick={() => setShowKeyInput(false)}>✕</button>
-            </div>
-          )}
-
           <div className="chat-messages">
             {history.length === 0 && (
               <div className="chat-empty">
-                <p>👋 Hi! Paste any item name or ask me anything about restaurant accounting.</p>
-                <p style={{ marginTop: 8, fontSize: 12 }}>Examples:</p>
+                <p>👋 Hi! Paste any item name or ask about restaurant accounting.</p>
+                {!apiKey && (
+                  <p style={{ marginTop: 10 }}>
+                    <button className="pivot-btn" onClick={onOpenSetup} style={{ width: "100%", justifyContent: "center" }}>
+                      ⚙️ Setup Groq API Key & Model
+                    </button>
+                  </p>
+                )}
+                <p style={{ marginTop: 10, fontSize: 12, fontWeight: 600 }}>Try asking:</p>
                 <div className="chat-examples">
-                  {["What is VANILLA 4LTR FD 368?","Is Monin Watermelon a beverage?","Which account for Classic Connect FTK?"].map(ex => (
+                  {["What is VANILLA 4LTR FD 368?", "Is Monin Watermelon a beverage?", "Which account for Classic Connect FTK?"].map(ex => (
                     <button key={ex} onClick={() => setInput(ex)} className="chat-example-chip">{ex}</button>
                   ))}
                 </div>
@@ -988,7 +1199,7 @@ function AiChatWidget({ availableAccounts }) {
             ))}
             {loading && (
               <div className="chat-msg chat-msg-assistant">
-                <div className="chat-bubble chat-typing">⠋⠙⠹⠸ Thinking...</div>
+                <div className="chat-bubble chat-typing">⠋ Thinking...</div>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -998,14 +1209,14 @@ function AiChatWidget({ availableAccounts }) {
             <input
               type="text"
               className="chat-input"
-              placeholder="Type item name or question..."
+              placeholder={chatCountdown > 0 ? `Wait ${chatCountdown}s...` : "Type item name..."}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
-              disabled={loading}
+              disabled={loading || chatCountdown > 0}
             />
-            <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim()}>
-              {loading ? "…" : "↑"}
+            <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim() || chatCountdown > 0}>
+              {loading ? "…" : chatCountdown > 0 ? `${chatCountdown}` : "↑"}
             </button>
           </div>
         </div>
@@ -1018,7 +1229,19 @@ export default function Home() {
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
   const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || "" : ""));
+  const [groqModel, setGroqModel] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_model") || "" : ""));
+  const [showAiSetup, setShowAiSetup] = useState(false);
   const [showDataPreview, setShowDataPreview] = useState(false);
+
+  const saveAiConfig = (key, model) => {
+    setApiKey(key);
+    setGroqModel(model);
+    if (typeof window !== "undefined") {
+      localStorage.setItem("groq_api_key", key);
+      localStorage.setItem("groq_model", model);
+    }
+  };
+
   const setT = (k, v) => setThresholds(t => ({ ...t, [k]: v }));
   const result = useMemo(() => current && previous ? analyse(current, previous, thresholds) : null, [current, previous, thresholds]);
   const upload = async (file, setter) => { try { setError(""); setter(await readFile(file)); } catch (e) { setError(e.message); } };
@@ -1033,7 +1256,12 @@ export default function Home() {
           <p className="eyebrow">FINANCE CONTROL CENTER</p>
           <h1>P&L Audit Desk</h1>
         </div>
-        <p className="privacy"><i /> Local analysis - files stay on your device</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button className={`header-ai-btn ${groqModel ? "configured" : ""}`} onClick={() => setShowAiSetup(true)}>
+            ⚙️ AI: {groqModel ? groqModel.replace("llama-", "").replace("-versatile", "").replace("-instant", "") : "Setup"}
+          </button>
+          <p className="privacy"><i /> Local analysis - files stay on your device</p>
+        </div>
       </header>
 
       {!result ? (
@@ -1063,7 +1291,10 @@ export default function Home() {
               <strong>Analysis ready</strong>
               <small>{current.name} vs {previous.name}</small>
             </div>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <button className="ai-setup-run-btn" onClick={() => setShowAiSetup(true)}>
+                ⚙️ {groqModel ? `AI: ${groqModel}` : "Configure AI"}
+              </button>
               <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
               <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
             </div>
@@ -1154,6 +1385,8 @@ export default function Home() {
               current={current}
               onGoToPivot={() => setTab("Account heads")}
               sharedApiKey={apiKey}
+              sharedModel={groqModel}
+              onOpenSetup={() => setShowAiSetup(true)}
               sharedAccounts={sharedAccounts}
             />
           )}
@@ -1212,9 +1445,23 @@ export default function Home() {
         </div>
       )}
 
+      {/* AI Setup & Configuration Modal */}
+      <AiSetupModal
+        isOpen={showAiSetup}
+        onClose={() => setShowAiSetup(false)}
+        apiKey={apiKey}
+        model={groqModel}
+        onSave={saveAiConfig}
+      />
+
       {/* AI Chat Widget — always visible when file loaded */}
       {current && (
-        <AiChatWidget availableAccounts={sharedAccounts} />
+        <AiChatWidget
+          availableAccounts={sharedAccounts}
+          apiKey={apiKey}
+          model={groqModel}
+          onOpenSetup={() => setShowAiSetup(true)}
+        />
       )}
     </main>
   );
