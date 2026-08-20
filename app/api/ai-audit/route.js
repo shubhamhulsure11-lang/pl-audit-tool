@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
 
+const CANDIDATE_MODELS = [
+  "gemini-2.5-flash",
+  "gemini-1.5-flash",
+  "gemini-2.0-flash-exp",
+  "gemini-1.5-pro"
+];
+
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -17,7 +24,6 @@ export async function POST(req) {
       return NextResponse.json({ error: "No items provided for analysis." }, { status: 400 });
     }
 
-    // Limit batch size to 30 items per request for speed and response quality
     const itemsToAudit = items.slice(0, 30);
 
     const prompt = `You are an expert restaurant accounting auditor.
@@ -65,32 +71,47 @@ Return a valid JSON array of objects with the following format:
 Only include items in the response that are MISCLASSIFIED (isMisclassified: true).
 Return ONLY the raw JSON array. Do not wrap in markdown quotes if possible, or use standard \`\`\`json block.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${apiKey}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          tools: [{ googleSearch: {} }],
-          generationConfig: {
-            temperature: 0.1
-          }
-        })
-      }
-    );
+    let lastError = "";
+    let data = null;
 
-    if (!response.ok) {
-      const errText = await response.text();
-      let errMsg = `Gemini API error (${response.status})`;
+    for (const model of CANDIDATE_MODELS) {
       try {
-        const parsedErr = JSON.parse(errText);
-        if (parsedErr?.error?.message) errMsg = parsedErr.error.message;
-      } catch (e) {}
-      return NextResponse.json({ error: errMsg }, { status: response.status });
+        const response = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: prompt }] }],
+              tools: [{ googleSearch: {} }],
+              generationConfig: {
+                temperature: 0.1
+              }
+            })
+          }
+        );
+
+        if (response.ok) {
+          data = await response.json();
+          break;
+        } else {
+          const errText = await response.text();
+          try {
+            const parsed = JSON.parse(errText);
+            lastError = parsed?.error?.message || `HTTP ${response.status}`;
+          } catch (e) {
+            lastError = `HTTP ${response.status}: ${errText}`;
+          }
+        }
+      } catch (err) {
+        lastError = err.message || "Network error";
+      }
     }
 
-    const data = await response.json();
+    if (!data) {
+      return NextResponse.json({ error: lastError || "Failed to reach Gemini models" }, { status: 400 });
+    }
+
     const candidate = data.candidates?.[0];
     const text = candidate?.content?.parts?.map(p => p.text || "").join("") || "";
 
