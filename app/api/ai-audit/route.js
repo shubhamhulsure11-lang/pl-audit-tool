@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
 
-const CANDIDATE_MODELS = [
-  "gemini-2.5-flash",
-  "gemini-1.5-flash",
-  "gemini-2.0-flash-exp",
-  "gemini-1.5-pro"
-];
-
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -28,7 +21,7 @@ export async function POST(req) {
 
     const prompt = `You are an expert restaurant accounting auditor.
 Analyze the following list of purchased items from a restaurant's Zoho Books export.
-Use Google Search to look up unfamiliar product names, brand codes, packaging SKUs, or abbreviations to identify what the product actually is in the real world.
+Identify what each product actually is in the real world (brand, packaging, ingredients, or equipment).
 
 RESTAURANT ACCOUNTING RULES:
 1. "Groceries" (or "Food & Groceries"): Food raw materials, rice, dal, wheat, atta, maida, sooji, spices, masala, cooking oil, sugar, salt, sauces, vinegar, dry fruits, etc.
@@ -52,9 +45,8 @@ ITEMS TO EVALUATE:
 ${JSON.stringify(itemsToAudit, null, 2)}
 
 For each item:
-1. Search the web to identify what it is.
-2. Determine if it is correctly classified or MISCLASSIFIED based on the restaurant rules and available account heads.
-3. If misclassified, determine the best suggested account from the AVAILABLE ACCOUNT HEADS.
+1. Determine if it is correctly classified or MISCLASSIFIED based on the restaurant rules and available account heads.
+2. If misclassified, determine the best suggested account from the AVAILABLE ACCOUNT HEADS.
 
 Return a valid JSON array of objects with the following format:
 [
@@ -64,30 +56,62 @@ Return a valid JSON array of objects with the following format:
     "actualAccount": "Actual account name from input",
     "suggestedAccount": "Best matching account from AVAILABLE ACCOUNT HEADS",
     "isMisclassified": true,
-    "webSummary": "Short 4-8 word description of what the product was identified as online",
+    "webSummary": "Short 4-8 word description of what the product is",
     "reason": "Clear explanation of why it belongs in the suggested account"
   }
 ]
 Only include items in the response that are MISCLASSIFIED (isMisclassified: true).
 Return ONLY the raw JSON array. Do not wrap in markdown quotes if possible, or use standard \`\`\`json block.`;
 
-    let lastError = "";
-    let data = null;
+    // 1. Discover available models for this specific API key via ListModels
+    let activeModel = "models/gemini-2.5-flash";
+    try {
+      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
+      if (listRes.ok) {
+        const listData = await listRes.json();
+        const available = (listData.models || []).filter(m =>
+          m.supportedGenerationMethods?.includes("generateContent")
+        );
+        // Find best flash model or any generateContent model
+        const preferred = available.find(m => m.name.includes("2.5-flash")) ||
+                          available.find(m => m.name.includes("flash")) ||
+                          available.find(m => m.name.includes("pro")) ||
+                          available[0];
+        if (preferred?.name) {
+          activeModel = preferred.name;
+        }
+      }
+    } catch (e) {
+      // fallback to default
+    }
 
-    for (const model of CANDIDATE_MODELS) {
+    // Strip leading 'models/' if endpoint includes it
+    const modelEndpoint = activeModel.replace(/^models\//, "");
+
+    // 2. Try with Google Search tool first, if error, fallback to standard generateContent
+    let data = null;
+    let lastError = "";
+
+    const requestPayloads = [
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { temperature: 0.1 }
+      },
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1 }
+      }
+    ];
+
+    for (const payload of requestPayloads) {
       try {
         const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelEndpoint}:generateContent?key=${apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts: [{ text: prompt }] }],
-              tools: [{ googleSearch: {} }],
-              generationConfig: {
-                temperature: 0.1
-              }
-            })
+            body: JSON.stringify(payload)
           }
         );
 
