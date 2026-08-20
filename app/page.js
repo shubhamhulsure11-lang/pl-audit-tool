@@ -356,7 +356,7 @@ function ThresholdInput({ label, value, onChange, maxVal = 100 }) {
 
 function MisclassificationsView({ items, current, onGoToPivot }) {
   const [q, setQ] = useState("");
-  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("gemini_api_key") || "" : ""));
+  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || localStorage.getItem("gemini_api_key") || "" : ""));
   const [showKeyModal, setShowKeyModal] = useState(false);
   const [tempKey, setTempKey] = useState("");
   const [aiLoading, setAiLoading] = useState(false);
@@ -365,7 +365,7 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
 
   const saveApiKey = (k) => {
     setApiKey(k);
-    if (typeof window !== "undefined") localStorage.setItem("gemini_api_key", k);
+    if (typeof window !== "undefined") localStorage.setItem("groq_api_key", k);
     setShowKeyModal(false);
   };
 
@@ -467,7 +467,7 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
       <div className="misclass-info-banner">
         <span>💡</span>
         <div style={{ flex: 1 }}>
-          <strong>Dual-Layer Audit:</strong> Instant local restaurant rules + live Google Web Search AI product lookup to verify unknown item codes, SKUs, and packaging supplies.
+          <strong>Dual-Layer Audit:</strong> Instant local restaurant rules + Groq AI (Llama 3.3 70B) product classification to verify unknown item codes, SKUs, and packaging supplies.
         </div>
         <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
           <button
@@ -475,12 +475,12 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
             onClick={runAiAudit}
             disabled={aiLoading}
           >
-            {aiLoading ? "🔍 Searching Web & Auditing..." : "🌐 Run AI Web-Search Audit"}
+            {aiLoading ? "🤖 AI Auditing..." : "🤖 Run AI Audit"}
           </button>
           <button
             className="ai-key-btn"
             onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}
-            title="Configure Gemini API Key"
+            title="Configure Groq API Key"
           >
             ⚙️ {apiKey ? "API Key Set" : "Add API Key"}
           </button>
@@ -490,18 +490,18 @@ function MisclassificationsView({ items, current, onGoToPivot }) {
       {aiError && (
         <div className="ai-error-box">
           <strong>AI Audit Notice:</strong> {aiError}
-          <button onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}>Enter Gemini API Key</button>
+          <button onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}>Enter Groq API Key</button>
         </div>
       )}
 
       {showKeyModal && (
         <div className="key-modal-overlay">
           <div className="key-modal">
-            <h3>Google Gemini API Key</h3>
-            <p>Paste your Gemini API key to enable live internet product search grounding. The key is saved safely in your browser.</p>
+            <h3>Groq API Key</h3>
+            <p>Paste your free Groq API key to enable AI-powered product classification. Get one free at <strong>console.groq.com</strong>. The key is saved safely in your browser.</p>
             <input
               type="password"
-              placeholder="AIzaSy..."
+              placeholder="gsk_..."
               className="key-input"
               value={tempKey}
               onChange={e => setTempKey(e.target.value)}
