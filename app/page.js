@@ -354,41 +354,165 @@ function ThresholdInput({ label, value, onChange, maxVal = 100 }) {
   return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="0" max={maxVal} value={value} onChange={e => onChange(Math.max(0, Math.min(maxVal, e.target.value === "" ? 0 : Number(e.target.value) || 0)))} /><span className="thresh-pct">%</span></div></label>;
 }
 
-function MisclassificationsView({ items, onGoToPivot }) {
+function MisclassificationsView({ items, current, onGoToPivot }) {
   const [q, setQ] = useState("");
+  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("gemini_api_key") || "" : ""));
+  const [showKeyModal, setShowKeyModal] = useState(false);
+  const [tempKey, setTempKey] = useState("");
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const [aiResults, setAiResults] = useState([]);
+
+  const saveApiKey = (k) => {
+    setApiKey(k);
+    if (typeof window !== "undefined") localStorage.setItem("gemini_api_key", k);
+    setShowKeyModal(false);
+  };
+
+  const runAiAudit = async () => {
+    if (!apiKey) {
+      setTempKey("");
+      setShowKeyModal(true);
+      return;
+    }
+    setAiLoading(true);
+    setAiError("");
+
+    try {
+      // Collect unique items from the current sheet
+      const uniqueMap = new Map();
+      (current?.records || []).forEach(r => {
+        if (r.item && !uniqueMap.has(r.item)) {
+          uniqueMap.set(r.item, { item: r.item, vendor: r.vendor, actualAccount: r.account, total: r.total });
+        }
+      });
+
+      const itemsList = [...uniqueMap.values()];
+      const sheetAccounts = [...new Set((current?.records || []).map(r => r.account).filter(a => a && a !== "Unassigned Account"))];
+
+      const res = await fetch("/api/ai-audit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: itemsList,
+          availableAccounts: sheetAccounts,
+          apiKey
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "AI Audit failed");
+      }
+
+      if (data.results && Array.isArray(data.results)) {
+        // Map total amounts to AI flagged results
+        const mappedAi = data.results.map(r => {
+          const matchedRecs = (current?.records || []).filter(rec => rec.item === r.item);
+          const total = matchedRecs.reduce((s, rec) => s + rec.total, 0);
+          return {
+            ...r,
+            isAi: true,
+            total: total || 0,
+            matchedKeyword: r.webSummary || "Web Search"
+          };
+        });
+        setAiResults(mappedAi);
+      }
+    } catch (e) {
+      setAiError(e.message);
+    } finally {
+      setAiLoading(false);
+    }
+  };
+
+  // Combine local and AI results
+  const combinedItems = useMemo(() => {
+    const map = new Map();
+    items.forEach(it => map.set(it.item, { ...it, source: "Rule Engine" }));
+    aiResults.forEach(it => {
+      map.set(it.item, { ...it, source: "AI Web Search" });
+    });
+    return [...map.values()].sort((a, b) => b.total - a.total);
+  }, [items, aiResults]);
+
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
-    if (!term) return items;
-    return items.filter(x =>
+    if (!term) return combinedItems;
+    return combinedItems.filter(x =>
       x.item.toLowerCase().includes(term) ||
       x.vendor.toLowerCase().includes(term) ||
       x.actualAccount.toLowerCase().includes(term) ||
       x.suggestedAccount.toLowerCase().includes(term) ||
-      x.matchedKeyword.toLowerCase().includes(term)
+      (x.matchedKeyword && x.matchedKeyword.toLowerCase().includes(term)) ||
+      (x.reason && x.reason.toLowerCase().includes(term))
     );
-  }, [items, q]);
+  }, [combinedItems, q]);
 
-  const totalExposure = useMemo(() => items.reduce((s, x) => s + x.total, 0), [items]);
+  const totalExposure = useMemo(() => combinedItems.reduce((s, x) => s + x.total, 0), [combinedItems]);
 
   return (
     <section className="panel">
       <div className="panelhead">
         <div>
-          <p className="eyebrow">RESTAURANT TAXONOMY AUDIT</p>
+          <p className="eyebrow">RESTAURANT AUDIT & WEB INTELLIGENCE</p>
           <h2>Account Head Misclassifications</h2>
         </div>
         <div className="pivot-summary-badges">
-          <b className="badge">{items.length} Flagged Items</b>
+          <b className="badge">{combinedItems.length} Flagged Items</b>
           <b className="badge accent-badge">{show(totalExposure)} Total Exposure</b>
         </div>
       </div>
 
       <div className="misclass-info-banner">
         <span>💡</span>
-        <div>
-          <strong>How this works:</strong> Items are matched against restaurant accounting rules (e.g., <em>Rice/Ghee &rarr; Groceries</em>, <em>Milk/Paneer &rarr; Dairy</em>, <em>Charcoal/Ice &rarr; Other Purchases</em>). Items placed in conflicting account heads are flagged below.
+        <div style={{ flex: 1 }}>
+          <strong>Dual-Layer Audit:</strong> Instant local restaurant rules + live Google Web Search AI product lookup to verify unknown item codes, SKUs, and packaging supplies.
+        </div>
+        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+          <button
+            className="ai-run-btn"
+            onClick={runAiAudit}
+            disabled={aiLoading}
+          >
+            {aiLoading ? "🔍 Searching Web & Auditing..." : "🌐 Run AI Web-Search Audit"}
+          </button>
+          <button
+            className="ai-key-btn"
+            onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}
+            title="Configure Gemini API Key"
+          >
+            ⚙️ {apiKey ? "API Key Set" : "Add API Key"}
+          </button>
         </div>
       </div>
+
+      {aiError && (
+        <div className="ai-error-box">
+          <strong>AI Audit Notice:</strong> {aiError}
+          <button onClick={() => { setTempKey(apiKey); setShowKeyModal(true); }}>Enter Gemini API Key</button>
+        </div>
+      )}
+
+      {showKeyModal && (
+        <div className="key-modal-overlay">
+          <div className="key-modal">
+            <h3>Google Gemini API Key</h3>
+            <p>Paste your Gemini API key to enable live internet product search grounding. The key is saved safely in your browser.</p>
+            <input
+              type="password"
+              placeholder="AIzaSy..."
+              className="key-input"
+              value={tempKey}
+              onChange={e => setTempKey(e.target.value)}
+            />
+            <div className="key-modal-actions">
+              <button className="btn-cancel" onClick={() => setShowKeyModal(false)}>Cancel</button>
+              <button className="btn-save" onClick={() => saveApiKey(tempKey)}>Save Key</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="pivot-toolbar">
         <div className="pivot-search-wrap">
@@ -409,20 +533,29 @@ function MisclassificationsView({ items, onGoToPivot }) {
         )}
       </div>
 
-      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Matched Rule", "Amount Exposure"]}>
+      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Detection / Web Summary", "Amount Exposure"]}>
         {filtered.length ? filtered.map((x, i) => (
           <tr key={i}>
-            <td style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</td>
+            <td>
+              <div style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</div>
+              {x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
+            </td>
             <td>{x.vendor}</td>
             <td><span className="pill-actual-acc">{x.actualAccount}</span></td>
             <td><span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span></td>
-            <td><span className="rule-tag">matched "{x.matchedKeyword}"</span></td>
+            <td>
+              {x.isAi ? (
+                <span className="pill-ai-badge">🌐 Web: {x.webSummary || x.matchedKeyword}</span>
+              ) : (
+                <span className="rule-tag">matched "{x.matchedKeyword}"</span>
+              )}
+            </td>
             <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)" }}>{show(x.total)}</td>
           </tr>
         )) : (
           <tr>
             <td colSpan="6">
-              <Empty>{items.length === 0 ? "🎉 No account head misclassifications detected! All items match their restaurant categories." : "No items match your search filter."}</Empty>
+              <Empty>{combinedItems.length === 0 ? "🎉 No account head misclassifications detected! All items match their restaurant categories." : "No items match your search filter."}</Empty>
             </td>
           </tr>
         )}
@@ -798,7 +931,7 @@ export default function Home() {
           )}
 
           {tab === "Misclassifications" && (
-            <MisclassificationsView items={result.misclassifications} onGoToPivot={() => setTab("Account heads")} />
+            <MisclassificationsView items={result.misclassifications} current={current} onGoToPivot={() => setTab("Account heads")} />
           )}
 
           {tab === "Account heads" && <AccountPivot current={current} />}
