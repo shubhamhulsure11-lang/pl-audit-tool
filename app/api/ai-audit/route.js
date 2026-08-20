@@ -1,12 +1,18 @@
 import { NextResponse } from "next/server";
 
-// Preferred model substrings in order of quality
+// Known non-chat model patterns to exclude (audio, vision-only, embedding, etc.)
+const EXCLUDE_PATTERNS = ["whisper", "tts", "distil", "embed", "vision", "playai", "playht"];
+
+// Preferred chat model substrings in order of quality (higher = better)
 const MODEL_PREFERENCES = [
-  "llama-3.3",
+  "llama-3.3-70b",
   "llama-3.1-70b",
   "llama3-70b",
-  "llama-3.1",
-  "llama3",
+  "deepseek",
+  "qwen",
+  "llama-3.1-8b",
+  "llama3-8b",
+  "llama",
   "mixtral",
   "gemma2",
   "gemma",
@@ -19,14 +25,19 @@ async function pickBestGroqModel(apiKey) {
     });
     if (!res.ok) return null;
     const data = await res.json();
-    const ids = (data.data || []).map((m) => m.id);
+
+    // Only keep chat/LLM models — exclude audio, tts, embed, etc.
+    const chatIds = (data.data || [])
+      .map((m) => m.id)
+      .filter((id) => !EXCLUDE_PATTERNS.some((pat) => id.toLowerCase().includes(pat)));
 
     for (const pref of MODEL_PREFERENCES) {
-      const found = ids.find((id) => id.toLowerCase().includes(pref));
+      const found = chatIds.find((id) => id.toLowerCase().includes(pref));
       if (found) return found;
     }
-    // Fallback: first available model
-    return ids[0] || null;
+
+    // Fallback: first remaining chat model
+    return chatIds[0] || null;
   } catch {
     return null;
   }
