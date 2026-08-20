@@ -63,73 +63,62 @@ Return a valid JSON array of objects with the following format:
 Only include items in the response that are MISCLASSIFIED (isMisclassified: true).
 Return ONLY the raw JSON array. Do not wrap in markdown quotes if possible, or use standard \`\`\`json block.`;
 
-    // 1. Discover available models for this specific API key via ListModels
-    let activeModel = "models/gemini-2.5-flash";
-    try {
-      const listRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`);
-      if (listRes.ok) {
-        const listData = await listRes.json();
-        const available = (listData.models || []).filter(m =>
-          m.supportedGenerationMethods?.includes("generateContent")
-        );
-        // Find best flash model or any generateContent model
-        const preferred = available.find(m => m.name.includes("2.5-flash")) ||
-                          available.find(m => m.name.includes("flash")) ||
-                          available.find(m => m.name.includes("pro")) ||
-                          available[0];
-        if (preferred?.name) {
-          activeModel = preferred.name;
-        }
-      }
-    } catch (e) {
-      // fallback to default
-    }
+    // Candidate models in order of Google API support
+    const candidateModels = [
+      "gemini-3.6-flash",
+      "gemini-3.6-pro",
+      "gemini-3-flash",
+      "gemini-2.5-flash",
+      "gemini-1.5-flash",
+      "gemini-pro"
+    ];
 
-    // Strip leading 'models/' if endpoint includes it
-    const modelEndpoint = activeModel.replace(/^models\//, "");
-
-    // 2. Try with Google Search tool first, if error, fallback to standard generateContent
     let data = null;
     let lastError = "";
 
-    const requestPayloads = [
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        tools: [{ googleSearch: {} }],
-        generationConfig: { temperature: 0.1 }
-      },
-      {
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.1 }
-      }
-    ];
-
-    for (const payload of requestPayloads) {
-      try {
-        const response = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${modelEndpoint}:generateContent?key=${apiKey}`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload)
-          }
-        );
-
-        if (response.ok) {
-          data = await response.json();
-          break;
-        } else {
-          const errText = await response.text();
-          try {
-            const parsed = JSON.parse(errText);
-            lastError = parsed?.error?.message || `HTTP ${response.status}`;
-          } catch (e) {
-            lastError = `HTTP ${response.status}: ${errText}`;
-          }
+    for (const model of candidateModels) {
+      // Try with Google Search tool first, then standard if tool is unsupported
+      const payloads = [
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          tools: [{ googleSearch: {} }],
+          generationConfig: { temperature: 0.1 }
+        },
+        {
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.1 }
         }
-      } catch (err) {
-        lastError = err.message || "Network error";
+      ];
+
+      for (const payload of payloads) {
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload)
+            }
+          );
+
+          if (response.ok) {
+            data = await response.json();
+            break;
+          } else {
+            const errText = await response.text();
+            try {
+              const parsed = JSON.parse(errText);
+              lastError = parsed?.error?.message || `HTTP ${response.status}`;
+            } catch (e) {
+              lastError = `HTTP ${response.status}: ${errText}`;
+            }
+          }
+        } catch (err) {
+          lastError = err.message || "Network error";
+        }
       }
+
+      if (data) break; // Model succeeded!
     }
 
     if (!data) {
