@@ -1,5 +1,39 @@
 import { NextResponse } from "next/server";
 
+async function getAvailableModel(apiKey) {
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}&pageSize=100`
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    const models = (data.models || []).filter(
+      (m) => m.supportedGenerationMethods?.includes("generateContent")
+    );
+
+    // Pick the best available model by preference
+    const preferenceOrder = [
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      "gemini-2.0-flash",
+      "gemini-1.5-flash",
+      "gemini-1.5-pro",
+      "gemini-pro",
+    ];
+
+    for (const pref of preferenceOrder) {
+      const found = models.find((m) => m.name?.includes(pref));
+      if (found) return found.name.replace("models/", "");
+    }
+
+    // Fallback: just pick the first available model
+    if (models[0]) return models[0].name.replace("models/", "");
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(req) {
   try {
     const body = await req.json();
@@ -8,7 +42,7 @@ export async function POST(req) {
     const apiKey = customKey || process.env.GEMINI_API_KEY;
     if (!apiKey) {
       return NextResponse.json(
-        { error: "No Gemini API key provided. Please enter your Gemini API key in the AI settings box." },
+        { error: "No Gemini API key provided. Please enter your Gemini API key." },
         { status: 400 }
       );
     }
@@ -17,26 +51,34 @@ export async function POST(req) {
       return NextResponse.json({ error: "No items provided for analysis." }, { status: 400 });
     }
 
+    // Step 1: Discover which model this API key actually supports
+    const model = await getAvailableModel(apiKey);
+    if (!model) {
+      return NextResponse.json(
+        { error: "Could not find any available Gemini model for your API key. Please check the key is valid and has the Generative Language API enabled." },
+        { status: 400 }
+      );
+    }
+
     const itemsToAudit = items.slice(0, 30);
 
     const prompt = `You are an expert restaurant accounting auditor.
 Analyze the following list of purchased items from a restaurant's Zoho Books export.
-Identify what each product actually is in the real world (brand, packaging, ingredients, or equipment).
+Identify what each product is in the real world using your knowledge.
 
 RESTAURANT ACCOUNTING RULES:
-1. "Groceries" (or "Food & Groceries"): Food raw materials, rice, dal, wheat, atta, maida, sooji, spices, masala, cooking oil, sugar, salt, sauces, vinegar, dry fruits, etc.
-   - GHEE is strictly Groceries (not Dairy).
-2. "Dairy": Milk, paneer, curd, dahi, fresh cream, butter, cheese, khoya, mawa, buttermilk.
-3. "Poultry": Chicken, mutton, lamb, goat meat, eggs, and general meats.
-4. "Sea food purchases" (or "Sea food"): Fish (Basa, Surmai, Pomfret, Rawas, Salmon), Prawns, Shrimp, Crab, Lobster, Squid, etc.
-5. "Beverages": Non-alcoholic drinks ONLY (Red Bull, Tonic Water, Diet Coke, Sodas, Real Juices, Fruit Syrups/Crushes like Monin/Malas, Packaged Mineral Water).
-6. "Liquor Purchases": Alcoholic beverages ONLY (Wine, Beer, Whisky, Vodka, Rum, Gin, Tequila, Brandy, Champagne, Shiraz, Cabernet, etc.).
-7. "Cigarette purchases": Cigarettes and smoking tobacco (Classic Connect, Ice Burst, Marlboro, Gold Flake, Wills, Lights, etc.).
-8. "Other Purchases": Charcoal (wood charcoal, coal), Ice (ice cubes, ice slabs, dry ice), wooden skewers, toothpicks.
-9. "Packing materials" / "Packaging & Disposables": Meal trays, containers, takeaway boxes, paper bags, tissues, paper napkins, aluminium foil, cling wrap, straws, disposable cutlery. Note: "Packing materials" and "Packaging & Disposables" are the EXACT SAME category.
-10. "Cleaning and housekeeping": Dishwash, detergents, floor cleaners (Lizol, Phenyl), Colin, Harpic, bleach, sanitizers, brooms, mops, wipers, garbage bags.
-11. "Kitchen tools": Katoris, utensils, kadai, tawa, knives, chopping boards, strainers, ladles, crockery, hotelware, cocktail shakers, jiggers.
-12. "Stationery & Office": Registers, KOT books, bill books, pens, POS rolls, thermal paper, toners.
+1. Groceries: Food raw materials, rice, dal, wheat, atta, maida, sooji, spices, masala, oil, sugar, salt, sauces, vinegar, dry fruits. GHEE = Groceries.
+2. Dairy: Milk, paneer, curd, dahi, fresh cream, butter, cheese, khoya, buttermilk.
+3. Poultry: Chicken, mutton, lamb, goat meat, eggs.
+4. Sea food purchases: Fish (Basa, Surmai, Pomfret, Rawas, Salmon), Prawns, Shrimp, Crab, Lobster, Squid.
+5. Beverages: Non-alcoholic ONLY (Red Bull, Tonic Water, Sodas, Juices, Syrups like Monin/Malas, Mineral Water).
+6. Liquor Purchases: Alcoholic beverages ONLY (Wine, Beer, Whisky, Vodka, Rum, Gin, Tequila, Brandy, Champagne, etc.).
+7. Cigarette purchases: Cigarettes and tobacco (Classic Connect, Ice Burst, Marlboro, Gold Flake, Wills, etc.).
+8. Other Purchases: Charcoal, Ice (cubes/slabs/dry ice), wooden skewers, toothpicks.
+9. Packing materials / Packaging & Disposables: Takeaway boxes, paper bags, tissues, foil, cling wrap, straws, disposable cutlery.
+10. Cleaning and housekeeping: Dishwash, detergents, floor cleaners, sanitizers, brooms, mops, garbage bags.
+11. Kitchen tools: Utensils, kadai, tawa, knives, chopping boards, crockery, cocktail shakers.
+12. Stationery & Office: Registers, KOT books, bill books, pens, POS rolls, thermal paper.
 
 AVAILABLE ACCOUNT HEADS IN THIS SHEET:
 ${(availableAccounts || []).join(", ")}
@@ -44,111 +86,81 @@ ${(availableAccounts || []).join(", ")}
 ITEMS TO EVALUATE:
 ${JSON.stringify(itemsToAudit, null, 2)}
 
-For each item:
-1. Determine if it is correctly classified or MISCLASSIFIED based on the restaurant rules and available account heads.
-2. If misclassified, determine the best suggested account from the AVAILABLE ACCOUNT HEADS.
+For each item, determine if it is MISCLASSIFIED based on the rules and available account heads.
 
-Return a valid JSON array of objects with the following format:
-[
-  {
-    "item": "Exact item name from input",
-    "vendor": "Vendor name",
-    "actualAccount": "Actual account name from input",
-    "suggestedAccount": "Best matching account from AVAILABLE ACCOUNT HEADS",
-    "isMisclassified": true,
-    "webSummary": "Short 4-8 word description of what the product is",
-    "reason": "Clear explanation of why it belongs in the suggested account"
-  }
-]
-Only include items in the response that are MISCLASSIFIED (isMisclassified: true).
-Return ONLY the raw JSON array. Do not wrap in markdown quotes if possible, or use standard \`\`\`json block.`;
+Return ONLY a JSON array (no markdown fences) of misclassified items in this format:
+[{"item":"...","vendor":"...","actualAccount":"...","suggestedAccount":"...","isMisclassified":true,"webSummary":"short product description","reason":"why it belongs in the suggested account"}]
+If nothing is misclassified, return an empty array: []`;
 
-    // Candidate models in order of Google API support
-    const candidateModels = [
-      "gemini-3.6-flash",
-      "gemini-3.6-pro",
-      "gemini-3-flash",
-      "gemini-2.5-flash",
-      "gemini-1.5-flash",
-      "gemini-pro"
+    // Step 2: Try with googleSearch grounding first, then without
+    const payloads = [
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        tools: [{ googleSearch: {} }],
+        generationConfig: { temperature: 0.1 }
+      },
+      {
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.1 }
+      }
     ];
 
     let data = null;
     let lastError = "";
 
-    for (const model of candidateModels) {
-      // Try with Google Search tool first, then standard if tool is unsupported
-      const payloads = [
+    for (const payload of payloads) {
+      const response = await fetch(
+        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
         {
-          contents: [{ parts: [{ text: prompt }] }],
-          tools: [{ googleSearch: {} }],
-          generationConfig: { temperature: 0.1 }
-        },
-        {
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: { temperature: 0.1 }
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
         }
-      ];
+      );
 
-      for (const payload of payloads) {
-        try {
-          const response = await fetch(
-            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload)
-            }
-          );
-
-          if (response.ok) {
-            data = await response.json();
-            break;
-          } else {
-            const errText = await response.text();
-            try {
-              const parsed = JSON.parse(errText);
-              lastError = parsed?.error?.message || `HTTP ${response.status}`;
-            } catch (e) {
-              lastError = `HTTP ${response.status}: ${errText}`;
-            }
-          }
-        } catch (err) {
-          lastError = err.message || "Network error";
-        }
+      if (response.ok) {
+        data = await response.json();
+        break;
       }
 
-      if (data) break; // Model succeeded!
+      const errText = await response.text();
+      try {
+        lastError = JSON.parse(errText)?.error?.message || `HTTP ${response.status}`;
+      } catch {
+        lastError = `HTTP ${response.status}`;
+      }
     }
 
     if (!data) {
-      return NextResponse.json({ error: lastError || "Failed to reach Gemini models" }, { status: 400 });
+      return NextResponse.json({ error: `Gemini API error: ${lastError}` }, { status: 400 });
     }
 
-    const candidate = data.candidates?.[0];
-    const text = candidate?.content?.parts?.map(p => p.text || "").join("") || "";
+    const text = (data.candidates?.[0]?.content?.parts || [])
+      .map((p) => p.text || "")
+      .join("")
+      .trim();
 
-    let jsonStr = text.trim();
-    const jsonMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      jsonStr = jsonMatch[1].trim();
+    let jsonStr = text;
+    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (fenceMatch) jsonStr = fenceMatch[1].trim();
+
+    // Sometimes the model wraps in an outer object
+    if (jsonStr.startsWith("{")) {
+      try {
+        const obj = JSON.parse(jsonStr);
+        jsonStr = JSON.stringify(obj.misclassifications || obj.items || obj.results || []);
+      } catch { /* ignore */ }
     }
 
     let parsed = [];
     try {
       parsed = JSON.parse(jsonStr);
-      if (!Array.isArray(parsed)) {
-        parsed = parsed.misclassifications || parsed.items || [];
-      }
-    } catch (e) {
-      return NextResponse.json({
-        rawText: text,
-        error: "Failed to parse AI response as JSON",
-        parsed: []
-      });
+      if (!Array.isArray(parsed)) parsed = [];
+    } catch {
+      return NextResponse.json({ rawText: text, error: "Failed to parse AI response", parsed: [] });
     }
 
-    return NextResponse.json({ success: true, results: parsed });
+    return NextResponse.json({ success: true, results: parsed, modelUsed: model });
   } catch (err) {
     return NextResponse.json({ error: err.message || "Internal server error" }, { status: 500 });
   }
