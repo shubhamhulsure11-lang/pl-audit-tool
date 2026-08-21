@@ -509,8 +509,8 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
             total: x.total
           },
           availableAccounts: sharedAccounts,
-          apiKey: sharedApiKey
-          // No model param — route uses 8B primary + 70B escalation automatically
+          apiKey: sharedApiKey,
+          model: sharedModel
         })
       });
       const data = await res.json();
@@ -1087,22 +1087,25 @@ function DataPreview({ data }) {
   );
 }
 
-// ─── AI SETUP MODAL ──────────────────────────────────────────────────────────
-function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
+// ─── AI SETUP MODAL (Single-source Verification) ───────────────────────────
+function AiSetupModal({ isOpen, onClose, apiKey, aiConfig, onSave }) {
   const [step, setStep] = useState("key"); // "key" | "model" | "testing" | "configured"
   const [keyInput, setKeyInput] = useState(apiKey || "");
-  const [selectedModel, setSelectedModel] = useState(model || "");
+  const [selectedModel, setSelectedModel] = useState(aiConfig?.model || "");
   const [availableModels, setAvailableModels] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     setKeyInput(apiKey || "");
-    setSelectedModel(model || "");
-    if (apiKey && model) setStep("configured");
-    else setStep("key");
+    setSelectedModel(aiConfig?.model || "");
+    if (apiKey && aiConfig?.verified) {
+      setStep("configured");
+    } else {
+      setStep("key");
+    }
     setError("");
-  }, [isOpen, apiKey, model]);
+  }, [isOpen, apiKey, aiConfig]);
 
   const fetchModels = async (overrideKey) => {
     const key = overrideKey || keyInput.trim();
@@ -1110,17 +1113,17 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
     setError("");
     setLoading(true);
     try {
-      const res = await fetch("/api/groq-models", {
+      const res = await fetch("/api/ai-config/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: key })
       });
       const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "Failed to connect to Groq");
-      const models = data.models || [];
-      if (!models.length) throw new Error("No chat models found for this key.");
+      if (!res.ok || data.error) throw new Error(data.error || "Failed to validate key with Groq");
+      const models = data.availableModels || [];
+      if (!models.length) throw new Error("No active chat models found for this Groq key.");
       setAvailableModels(models);
-      const choice = (model && models.includes(model)) ? model : models[0];
+      const choice = (aiConfig?.model && models.includes(aiConfig.model)) ? aiConfig.model : (data.model || models[0]);
       setSelectedModel(choice);
       setStep("model");
     } catch (e) {
@@ -1136,22 +1139,18 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
     setError("");
     setStep("testing");
     try {
-      const res = await fetch("/api/ai-audit", {
+      const res = await fetch("/api/ai-config/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          singleItem: { item: "Amul Butter 500g", vendor: "Amul Store", actualAccount: "Dairy" },
-          availableAccounts: ["Dairy", "Groceries"],
           apiKey: keyInput.trim(),
           model: selectedModel
         })
       });
       const data = await res.json();
-      if (res.status === 429) {
-        throw new Error(`Rate limit hit on Groq (${data.retryAfter || 30}s). Try 'llama-3.1-8b-instant' which has a higher quota.`);
-      }
-      if (!res.ok || data.error) throw new Error(data.error || "Model test failed");
-      onSave(keyInput.trim(), selectedModel);
+      if (!res.ok || data.error) throw new Error(data.error || "Model verification failed");
+      
+      onSave(keyInput.trim(), data.config);
       setStep("configured");
     } catch (e) {
       setError(e.message);
@@ -1175,7 +1174,13 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
           {step === "key" && (
             <>
               <p className="setup-desc">
-                Paste your free Groq API key. If you need one, create it for free at <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>.
+                {aiConfig?.verified && !apiKey ? (
+                  <span style={{ color: "#d97706", fontWeight: 600, display: "block", marginBottom: 6 }}>
+                    🔑 Session Expired: Please enter your Groq API key to activate AI for this session.
+                  </span>
+                ) : (
+                  <>Paste your free Groq API key. If you need one, create it for free at <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>.</>
+                )}
               </p>
               <label className="setup-label">Groq API Key</label>
               <input
@@ -1190,7 +1195,7 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
               <div className="setup-actions">
                 <button className="btn-cancel" onClick={onClose}>Cancel</button>
                 <button className="btn-save" onClick={() => fetchModels()} disabled={loading || !keyInput.trim()}>
-                  {loading ? "Checking..." : "Next: Choose Model →"}
+                  {loading ? "Verifying Key..." : "Next: Choose Model →"}
                 </button>
               </div>
             </>
@@ -1216,7 +1221,7 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
 
               <div className="model-info-box">
                 <strong>Tip for Free Tier</strong>
-                <code>llama-3.1-8b-instant</code> offers the best performance with high free tokens-per-minute limits.
+                <code>llama-3.1-8b-instant</code> offers the best balance of speed and high free tokens-per-minute limits.
               </div>
 
               {error && <div className="setup-error"><span>⚠</span> {error}</div>}
@@ -1224,7 +1229,7 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
               <div className="setup-actions">
                 <button className="btn-cancel" onClick={() => setStep("key")}>← Change Key</button>
                 <button className="btn-save" onClick={testAndSave} disabled={loading || !selectedModel}>
-                  {loading ? "Testing..." : "Test & Save Config →"}
+                  {loading ? "Verifying..." : "Test & Save Config →"}
                 </button>
               </div>
             </>
@@ -1233,15 +1238,16 @@ function AiSetupModal({ isOpen, onClose, apiKey, model, onSave }) {
           {step === "testing" && (
             <div className="setup-testing">
               <span className="setup-spinner">⚙️</span>
-              <p>Testing connection with <strong>{selectedModel}</strong>...</p>
+              <p>Performing live connection test with <strong>{selectedModel}</strong>...</p>
             </div>
           )}
 
           {step === "configured" && (
             <div className="setup-success">
               <span className="setup-success-icon">✅</span>
-              <h4>AI Configured & Ready</h4>
-              <p>Active Model: <strong>{model || selectedModel}</strong></p>
+              <h4>AI Configuration Verified</h4>
+              <p>Active Model: <strong>{aiConfig?.model || selectedModel}</strong></p>
+              <p style={{ fontSize: 11, color: "var(--muted)", marginTop: 4 }}>Provider: Groq · Verified Live</p>
               <div className="setup-actions" style={{ marginTop: 16 }}>
                 <button className="btn-cancel" onClick={() => fetchModels(apiKey)}>Change Model</button>
                 <button className="btn-save" onClick={onClose}>Done</button>
@@ -1387,27 +1393,30 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
 export default function Home() {
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
-  const [apiKey, setApiKey] = useState(() => (typeof window !== "undefined" ? localStorage.getItem("groq_api_key") || "" : ""));
-  const [groqModel, setGroqModel] = useState(() => {
-    if (typeof window === "undefined") return "";
-    const stored = localStorage.getItem("groq_model") || "";
-    // Auto-clear reasoning/experimental models — they leak <think> tokens
-    const BAD_PATTERNS = ["qwen", "deepseek", "r1", "think", "reasoning", "preview", "canopy", "orpheus", "arabic", "distil", "vision", "guard", "speculative", "whisper", "tts", "embed", "openai"];
-    if (stored && BAD_PATTERNS.some(p => stored.toLowerCase().includes(p))) {
-      localStorage.removeItem("groq_model");
-      return "";
-    }
-    return stored;
+  const [aiConfig, setAiConfig] = useState(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = localStorage.getItem("ai_config");
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return null;
   });
+  const [apiKey, setApiKey] = useState(() => {
+    if (typeof window === "undefined") return "";
+    return sessionStorage.getItem("groq_api_key") || "";
+  });
+  const groqModel = aiConfig?.model || "";
   const [showAiSetup, setShowAiSetup] = useState(false);
   const [showDataPreview, setShowDataPreview] = useState(false);
 
-  const saveAiConfig = (key, model) => {
+  const saveAiConfig = (key, config) => {
     setApiKey(key);
-    setGroqModel(model);
+    setAiConfig(config);
     if (typeof window !== "undefined") {
-      localStorage.setItem("groq_api_key", key);
-      localStorage.setItem("groq_model", model);
+      sessionStorage.setItem("groq_api_key", key);
+      localStorage.setItem("ai_config", JSON.stringify(config));
+      localStorage.removeItem("groq_api_key");
+      localStorage.removeItem("groq_model");
     }
   };
 
@@ -1426,8 +1435,15 @@ export default function Home() {
           <h1>P&L Audit Desk</h1>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button className={`header-ai-btn ${groqModel ? "configured" : ""}`} onClick={() => setShowAiSetup(true)}>
-            ⚙️ AI: {groqModel ? groqModel.replace("llama-", "").replace("-versatile", "").replace("-instant", "") : "Setup"}
+          <button
+            className={`header-ai-btn ${aiConfig?.verified && apiKey ? "configured" : ""}`}
+            onClick={() => setShowAiSetup(true)}
+          >
+            {aiConfig?.verified && apiKey
+              ? `⚙️ AI: ${groqModel.replace("llama-", "").replace("-versatile", "").replace("-instant", "")}`
+              : aiConfig?.verified && !apiKey
+              ? `⚙️ AI: Re-enter Key ⚠️`
+              : `⚙️ AI: Setup`}
           </button>
           <p className="privacy"><i /> Local analysis - files stay on your device</p>
         </div>
@@ -1619,7 +1635,7 @@ export default function Home() {
         isOpen={showAiSetup}
         onClose={() => setShowAiSetup(false)}
         apiKey={apiKey}
-        model={groqModel}
+        aiConfig={aiConfig}
         onSave={saveAiConfig}
       />
 

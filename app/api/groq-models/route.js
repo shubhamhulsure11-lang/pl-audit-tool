@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-// Standard production chat models only (NO reasoning models with <think> tokens, NO experimental preview models)
+// Standard production chat models only (NO reasoning models with <think> tokens, NO audio/embed/guard models)
 const SAFE_PREFIXES = ["llama", "mixtral", "gemma"];
 const EXCLUDE_PATTERNS = [
   "whisper", "tts", "distil", "embed", "vision", "playai", "playht",
@@ -8,7 +8,7 @@ const EXCLUDE_PATTERNS = [
   "deepseek", "qwen", "r1", "reasoning", "think"
 ];
 
-// Exact priority order
+// Preferred priority order
 const MODEL_PRIORITY = [
   "llama-3.1-8b-instant",
   "llama-3.3-70b-versatile",
@@ -37,10 +37,10 @@ export async function POST(req) {
     }
 
     const data = await res.json();
-    const availableSet = new Set((data.data || []).map(m => m.id));
+    const rawList = data.data || [];
 
     // Filter available models strictly
-    const filtered = (data.data || [])
+    const filtered = rawList
       .map(m => m.id)
       .filter(id => {
         const lower = id.toLowerCase();
@@ -59,8 +59,7 @@ export async function POST(req) {
     });
 
     if (!filtered.length) {
-      // Fallback to standard Llama 3.1 8B instant
-      return NextResponse.json({ models: ["llama-3.1-8b-instant"] });
+      return NextResponse.json({ error: "No compatible production chat models found for this Groq key." }, { status: 400 });
     }
 
     return NextResponse.json({ models: filtered });

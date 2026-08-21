@@ -72,7 +72,7 @@ function parseResult(rawContent) {
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { singleItem, availableAccounts = [], apiKey } = body;
+    const { singleItem, availableAccounts = [], apiKey, model, fallbackModel } = body;
 
     if (!apiKey) return NextResponse.json({ error: "No API key. Use ⚙️ AI Setup." }, { status: 400 });
     if (!singleItem) return NextResponse.json({ error: "No item provided." }, { status: 400 });
@@ -90,8 +90,8 @@ export async function POST(req) {
       accounts: (availableAccounts || []).slice(0, 14)
     });
 
-    // ── Stage 1: Fast 8B model ─────────────────────────────────────────────
-    const PRIMARY_MODEL = "llama-3.1-8b-instant";
+    // ── Stage 1: Primary verified model ─────────────────────────────────────
+    const PRIMARY_MODEL = model || "llama-3.1-8b-instant";
     const res1 = await callGroq(apiKey, PRIMARY_MODEL, userContent);
 
     // Handle rate limit from Stage 1
@@ -122,13 +122,14 @@ export async function POST(req) {
     let escalated = false;
     let usedModel = PRIMARY_MODEL;
 
-    // ── Stage 2: Escalate to 70B if low confidence or uncertain ───────────
+    // ── Stage 2: Escalate to 70B if low confidence or uncertain (only if primary is not already 70B) ──
     const needsEscalation = result.review_required === true ||
       result.classification_status === "REVIEW_REQUIRED" ||
       (typeof result.confidence === "number" && result.confidence < 75);
 
-    if (needsEscalation) {
-      const ESCALATION_MODEL = "llama-3.3-70b-versatile";
+    const ESCALATION_MODEL = fallbackModel || (PRIMARY_MODEL.includes("70b") ? null : "llama-3.3-70b-versatile");
+
+    if (needsEscalation && ESCALATION_MODEL && ESCALATION_MODEL !== PRIMARY_MODEL) {
       try {
         const res2 = await callGroq(apiKey, ESCALATION_MODEL, userContent);
         if (res2.ok) {
@@ -140,7 +141,7 @@ export async function POST(req) {
             usedModel = ESCALATION_MODEL;
           }
         }
-        // If Stage 2 fails (rate limit etc.), silently use Stage 1 result
+        // If Stage 2 fails (rate limit, model not found etc.), silently use Stage 1 result
       } catch {
         // Stage 2 network error — proceed with Stage 1 result
       }
