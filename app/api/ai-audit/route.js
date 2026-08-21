@@ -1,100 +1,152 @@
 import { NextResponse } from "next/server";
 
+// ─── Compact system prompt (~500 tokens) ─────────────────────────────────────
+// Designed to fit comfortably within llama-3.1-8b-instant's 6K TPM budget
+// while giving the model full context for accurate product identification.
+const SYSTEM_PROMPT = `You are an accounting auditor for a restaurant/hospitality business.
+
+TASK: Independently identify the ACTUAL PURCHASED PRODUCT and determine the correct account head.
+
+CRITICAL — NEVER CLASSIFY BY ISOLATED KEYWORDS:
+A word in an item name may be a brand, flavour, colour, size, design, shape, or model number — NOT the actual product. Understand the complete item description before classifying.
+
+KEYWORD TRAP EXAMPLES (learn these patterns):
+• "DIP BOWL ROUND WHITE APPLE" → product=BOWL (apple=design, not fruit) → Cutlery/crockery
+• "MONIN WATERMELON 700ML" → Monin=syrup brand, watermelon=flavour → Beverages
+• "VANILLA 4LTR" from dairy vendor → vanilla flavouring/extract → Groceries, NOT dairy
+• "BANANA LEAF" → serving/packing material for restaurant use → Packing material, NOT vegetables
+• "ARCOROC WHEAT BEER GLASS" → product=GLASS (beer=glass type) → Cutlery/crockery
+• "BACARDI CLASSIC WHITE RUM" → product=RUM (classic=variant) → Liquor, NOT cigarettes
+
+RULES:
+1. Vendor name alone does NOT determine category
+2. Evaluate the current account head independently — it may be wrong
+3. Evaluate the suggested account head independently — it may also be wrong
+4. Choose the most specific valid account from the provided accounts list
+5. Never invent a new account head — only use accounts from the provided list
+6. If genuinely unclear, return classification_status "REVIEW_REQUIRED"
+
+CLASSIFICATION_STATUS values (return exactly one):
+CURRENT_CORRECT | CURRENT_INCORRECT | SUGGESTION_CORRECT | SUGGESTION_INCORRECT | BOTH_INCORRECT | BOTH_CORRECT | REVIEW_REQUIRED
+
+VERDICT values (for current_verdict and suggested_verdict):
+CORRECT | INCORRECT | UNCERTAIN
+
+Return ONLY valid JSON, no markdown, no text outside JSON:
+{"product_type":"","brand":"","flavour_or_variant":"","intended_use":"","current_verdict":"","suggested_verdict":"","classification_status":"","ai_final_account_head":"","ai_reason":"","confidence":0,"review_required":false,"review_note":""}`;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
 function parseRetryAfter(errorMsg) {
   const m = String(errorMsg || "").match(/try again in (\d+(?:\.\d+)?)\s*s/i);
   return m ? Math.ceil(parseFloat(m[1])) : 30;
 }
 
-function cleanThinking(text) {
-  if (!text) return "";
-  let cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
-  cleaned = cleaned.replace(/<think>[\s\S]*/gi, "");
-  return cleaned.trim();
+async function callGroq(apiKey, model, userContent) {
+  return fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT },
+        { role: "user", content: userContent }
+      ],
+      temperature: 0.1,
+      max_tokens: 320,
+      response_format: { type: "json_object" }   // JSON mode: guaranteed JSON output
+    })
+  });
 }
+
+function parseResult(rawContent) {
+  try {
+    return JSON.parse(rawContent || "{}");
+  } catch {
+    return null;
+  }
+}
+
+// ─── Route ────────────────────────────────────────────────────────────────────
 
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { singleItem, availableAccounts = [], apiKey, model = "llama-3.1-8b-instant" } = body;
+    const { singleItem, availableAccounts = [], apiKey } = body;
 
     if (!apiKey) return NextResponse.json({ error: "No API key. Use ⚙️ AI Setup." }, { status: 400 });
     if (!singleItem) return NextResponse.json({ error: "No item provided." }, { status: 400 });
 
-    const { item, vendor, actualAccount } = singleItem;
-    const accountList = (availableAccounts || []).slice(0, 10).join(", ");
+    const { item, vendor, actualAccount, suggestedAccount, matchedKeyword, total } = singleItem;
 
-    const prompt = `Restaurant accounting auditor. Verify if this purchase item is booked in the right Zoho account.
-
-Item: "${item}"
-Vendor: "${vendor}"
-Current Account in Zoho: "${actualAccount}"
-Available Account Heads: ${accountList || "Groceries purchases, Dairy products purchases, Sea food purchases, Poultry and meat purchases, Beverages, Liquor purchases, Cleaning and housekeeping, Packaging & Disposables, Stationery"}
-
-Rules:
-- Coconut milk / Coconut milk powder, vanilla, knorr, seasonings, broth powder, food colors, sauces, oil, sugar, spices → Groceries purchases
-- Cream cheese, butter, paneer, curd, milk, fresh cream → Dairy products purchases
-- Ginger ale, tonic water, soda, red bull, juices, syrups → Beverages (Non-alcoholic)
-- Wine, beer, whisky, rum, gin, vodka → Liquor purchases (Alcoholic)
-- Banana leaves (for serving/packing), takeaway boxes, paper bags, foil, napkins → Packaging & Disposables / Packing material
-- Dishwash, floor cleaner, lizol, detergent, soap oil → Cleaning and housekeeping
-- Raw chicken, mutton, lamb, eggs → Poultry and meat purchases
-- Raw fish (basa, surmai, pomfret, salmon), prawns, shrimp, crab → Sea food purchases
-
-Return JSON ONLY (no other words, no markdown):
-If currently booked account is CORRECT: {"ok":true}
-If WRONG: {"ok":false,"suggest":"exact name from Available Account Heads","why":"short reason"}`;
-
-    const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({
-        model,
-        messages: [{ role: "user", content: prompt }],
-        temperature: 0.1,
-        max_tokens: 256
-      })
+    // Compact JSON payload — sent as the user message
+    const userContent = JSON.stringify({
+      item: item || "",
+      vendor: vendor || "",
+      current: actualAccount || "",
+      suggested: suggestedAccount || "",
+      amount: total || 0,
+      detection: matchedKeyword || "",
+      accounts: (availableAccounts || []).slice(0, 14)
     });
 
-    if (res.status === 429) {
-      const errText = await res.text();
+    // ── Stage 1: Fast 8B model ─────────────────────────────────────────────
+    const PRIMARY_MODEL = "llama-3.1-8b-instant";
+    const res1 = await callGroq(apiKey, PRIMARY_MODEL, userContent);
+
+    // Handle rate limit from Stage 1
+    if (res1.status === 429) {
+      const errText = await res1.text();
       let errMsg = "";
       try { errMsg = JSON.parse(errText)?.error?.message || ""; } catch { /* ignore */ }
-      const retryAfter = parseRetryAfter(errMsg);
-      return NextResponse.json({ error: "Rate limited", retryAfter }, { status: 429 });
+      return NextResponse.json({ error: "Rate limited", retryAfter: parseRetryAfter(errMsg) }, { status: 429 });
     }
 
-    if (!res.ok) {
-      const errText = await res.text();
-      let errMsg = `Groq error (${res.status})`;
+    if (!res1.ok) {
+      const errText = await res1.text();
+      let errMsg = `Groq error (${res1.status})`;
       try { errMsg = JSON.parse(errText)?.error?.message || errMsg; } catch { /* ignore */ }
-      return NextResponse.json({ error: errMsg }, { status: res.status });
+      return NextResponse.json({ error: errMsg }, { status: res1.status });
     }
 
-    const data = await res.json();
-    let text = (data.choices?.[0]?.message?.content || "").trim();
-    text = cleanThinking(text);
+    const data1 = await res1.json();
+    let result = parseResult(data1.choices?.[0]?.message?.content);
 
-    // Strip markdown fences
-    const fenceMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    if (fenceMatch) text = fenceMatch[1].trim();
-
-    // Extract outermost JSON object
-    const jsonStart = text.indexOf("{");
-    const jsonEnd = text.lastIndexOf("}");
-    if (jsonStart >= 0 && jsonEnd > jsonStart) {
-      text = text.slice(jsonStart, jsonEnd + 1);
-    }
-
-    try {
-      const result = JSON.parse(text);
-      return NextResponse.json({ success: true, result, model });
-    } catch {
-      // Parse failed — do NOT fake success. Return error so UI shows ⚠️.
-      const snippet = text ? text.slice(0, 120).replace(/\n/g, " ") : "(empty)";
+    if (!result || !result.classification_status) {
+      // JSON mode should prevent this, but handle gracefully
       return NextResponse.json({
-        error: `AI returned non-JSON output. Try a different model in ⚙️ AI Setup. Snippet: "${snippet}"`
+        error: "AI returned an unexpected response. Try again or change model in ⚙️ AI Setup."
       }, { status: 422 });
     }
+
+    let escalated = false;
+    let usedModel = PRIMARY_MODEL;
+
+    // ── Stage 2: Escalate to 70B if low confidence or uncertain ───────────
+    const needsEscalation = result.review_required === true ||
+      result.classification_status === "REVIEW_REQUIRED" ||
+      (typeof result.confidence === "number" && result.confidence < 75);
+
+    if (needsEscalation) {
+      const ESCALATION_MODEL = "llama-3.3-70b-versatile";
+      try {
+        const res2 = await callGroq(apiKey, ESCALATION_MODEL, userContent);
+        if (res2.ok) {
+          const data2 = await res2.json();
+          const result2 = parseResult(data2.choices?.[0]?.message?.content);
+          if (result2?.classification_status) {
+            result = result2;
+            escalated = true;
+            usedModel = ESCALATION_MODEL;
+          }
+        }
+        // If Stage 2 fails (rate limit etc.), silently use Stage 1 result
+      } catch {
+        // Stage 2 network error — proceed with Stage 1 result
+      }
+    }
+
+    return NextResponse.json({ success: true, result, model: usedModel, escalated });
   } catch (err) {
     return NextResponse.json({ error: err.message || "Internal error" }, { status: 500 });
   }

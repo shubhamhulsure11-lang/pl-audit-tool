@@ -500,10 +500,17 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          singleItem: { item: x.item, vendor: x.vendor, actualAccount: x.actualAccount },
+          singleItem: {
+            item: x.item,
+            vendor: x.vendor,
+            actualAccount: x.actualAccount,
+            suggestedAccount: x.suggestedAccount,   // Rule engine suggestion
+            matchedKeyword: x.matchedKeyword,         // Detection reason
+            total: x.total
+          },
           availableAccounts: sharedAccounts,
-          apiKey: sharedApiKey,
-          model: sharedModel
+          apiKey: sharedApiKey
+          // No model param — route uses 8B primary + 70B escalation automatically
         })
       });
       const data = await res.json();
@@ -537,26 +544,43 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
       if (!res.ok || data.error) throw new Error(data.error || "AI error");
 
       const resObj = data.result || {};
-      const isMis = resObj.ok === false;
+      const status = resObj.classification_status || "";
+      // Item is misclassified when AI says current account is wrong
+      const isMis = status === "CURRENT_INCORRECT" || status === "BOTH_INCORRECT";
+      // AI-confirmed account: prefer ai_final_account_head, fallback to rule engine suggestion
+      const aiAccount = resObj.ai_final_account_head || "";
+
       setRowAiState(prev => ({
         ...prev,
         [rowKey]: {
           loading: false,
-          result: { isMisclassified: isMis, suggestedAccount: resObj.suggest, why: resObj.why },
+          result: {
+            isMisclassified: isMis,
+            suggestedAccount: isMis ? (aiAccount || x.suggestedAccount) : "",
+            why: resObj.ai_reason || "",
+            classificationStatus: status,
+            currentVerdict: resObj.current_verdict || "",
+            suggestedVerdict: resObj.suggested_verdict || "",
+            confidence: typeof resObj.confidence === "number" ? resObj.confidence : null,
+            reviewRequired: resObj.review_required || false,
+            reviewNote: resObj.review_note || "",
+            escalated: data.escalated || false,
+            usedModel: data.model || ""
+          },
           error: null,
           countdown: 0
         }
       }));
 
-      if (isMis && resObj.suggest) {
+      if (isMis && aiAccount) {
         setAiResults(prev => {
           const existing = prev.findIndex(r => r.item === x.item && r.vendor === x.vendor);
           const entry = {
             ...x,
             isAi: true,
-            suggestedAccount: resObj.suggest,
-            matchedKeyword: resObj.why || "AI Verified",
-            reason: resObj.why || x.reason
+            suggestedAccount: aiAccount,
+            matchedKeyword: resObj.ai_reason || "AI Verified",
+            reason: resObj.ai_reason || x.reason
           };
           if (existing >= 0) { const next = [...prev]; next[existing] = entry; return next; }
           return [...prev, entry];
@@ -608,7 +632,7 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
       <div className="misclass-info-banner">
         <span>🔬</span>
         <div style={{ flex: 1 }}>
-          <strong>Dual-Layer Audit:</strong> High-confidence rule engine runs instantly. Click <strong>🤖 Ask AI</strong> on any row for an instant AI second-opinion using <strong>{sharedModel || "your configured Groq model"}</strong>.
+          <strong>Dual-Layer Audit:</strong> Rule engine flags instantly. Click <strong>🤖 Ask AI</strong> for AI second-opinion — uses <strong>llama-3.1-8b-instant</strong> (fast) and auto-escalates to <strong>llama-3.3-70b-versatile</strong> (shown as 70B↑) when confidence is below 75% or review is needed.
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="pivot-btn" onClick={onOpenSetup}>⚙️ AI Config</button>
@@ -630,51 +654,115 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
         </div>
       </div>
 
-      <Table head={["Item Description", "Vendor", "Current Account Head", "Suggested Account Head", "Detection / AI Reason", "Amount", "AI Check"]}>
+      <Table head={["Item Description", "Vendor", "Current Account Head", "AI Final Account", "Detection / AI Reason", "Amount", "AI Check"]}>
         {filtered.length ? filtered.map((x, i) => {
           const rowKey = `${x.item}:::${x.vendor}`;
           const rowAi = rowAiState[rowKey];
+          const ai = rowAi?.result;
+
+          // Chip color by classification_status
+          const statusColors = {
+            CURRENT_CORRECT: { bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
+            BOTH_CORRECT:    { bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
+            SUGGESTION_CORRECT: { bg: "#dbeafe", color: "#1d4ed8", border: "#bfdbfe" },
+            CURRENT_INCORRECT:  { bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
+            SUGGESTION_INCORRECT: { bg: "#fff7ed", color: "#c2410c", border: "#fed7aa" },
+            BOTH_INCORRECT:  { bg: "#fee2e2", color: "#b91c1c", border: "#fecaca" },
+            REVIEW_REQUIRED: { bg: "#fef9c3", color: "#92400e", border: "#fde68a" },
+          };
+          const sc = ai?.classificationStatus ? (statusColors[ai.classificationStatus] || { bg: "#f3f4f6", color: "#374151", border: "#e5e7eb" }) : null;
+
           return (
             <tr key={i}>
               <td>
                 <div style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</div>
-                {x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
-                {rowAi?.result && !rowAi.result.isMisclassified && (
-                  <small style={{ color: "#16a34a", display: "block", marginTop: "3px", fontSize: "11px", fontWeight: 600 }}>✅ AI: Correctly booked</small>
+                {/* Rule engine detection reason (before AI runs) */}
+                {!ai && x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
+                {/* AI classification status chip + confidence */}
+                {ai?.classificationStatus && sc && (
+                  <span style={{
+                    display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5,
+                    padding: "2px 7px", borderRadius: 12, fontSize: "10.5px", fontWeight: 700,
+                    background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, letterSpacing: "0.02em"
+                  }}>
+                    {ai.classificationStatus.replace(/_/g, " ")}
+                    {ai.confidence != null && ` · ${ai.confidence}%`}
+                    {ai.escalated && <span title="Escalated to llama-3.3-70b-versatile for higher confidence" style={{ marginLeft: 3, fontSize: "9px", opacity: 0.8 }}>70B↑</span>}
+                  </span>
                 )}
+                {/* Error / rate limit */}
                 {rowAi?.error && (
                   <small style={{ color: rowAi.countdown > 0 ? "#b45309" : "#dc2626", display: "block", marginTop: "3px", fontSize: "11px" }}>
                     {rowAi.countdown > 0 ? `⏳ ${rowAi.error}` : `⚠ ${rowAi.error}`}
                   </small>
                 )}
               </td>
+
               <td>{x.vendor}</td>
-              <td><span className="pill-actual-acc">{x.actualAccount}</span></td>
+
+              {/* Current Account + AI verdict on it */}
               <td>
-                {rowAi?.result?.isMisclassified && rowAi.result.suggestedAccount ? (
-                  <span className="pill-suggested-acc">🤖 {rowAi.result.suggestedAccount}</span>
+                <span className="pill-actual-acc">{x.actualAccount}</span>
+                {ai?.currentVerdict === "CORRECT" && (
+                  <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#16a34a", fontWeight: 700 }}>✓ Correct</span>
+                )}
+                {ai?.currentVerdict === "INCORRECT" && (
+                  <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>✗ Incorrect</span>
+                )}
+                {ai?.currentVerdict === "UNCERTAIN" && (
+                  <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#d97706", fontWeight: 700 }}>? Uncertain</span>
+                )}
+              </td>
+
+              {/* AI final account head (overrides rule engine suggestion when AI has responded) */}
+              <td>
+                {ai?.classificationStatus ? (
+                  ai.isMisclassified && ai.suggestedAccount ? (
+                    <>
+                      <span className="pill-suggested-acc">🤖 {ai.suggestedAccount}</span>
+                      {ai.suggestedVerdict === "CORRECT" && (
+                        <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#1d4ed8", fontWeight: 700 }}>✓ AI Confirmed</span>
+                      )}
+                    </>
+                  ) : ai.reviewRequired ? (
+                    <span style={{ fontSize: "11px", color: "#92400e", fontWeight: 600 }}>⚠ Review required</span>
+                  ) : (
+                    <span style={{ fontSize: "11px", color: "#15803d", fontWeight: 600 }}>✅ Correctly booked</span>
+                  )
                 ) : (
                   <span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span>
                 )}
               </td>
+
+              {/* Detection reason or AI explanation */}
               <td>
-                {rowAi?.result?.why ? (
-                  <span className="pill-ai-badge">🤖 {rowAi.result.why}</span>
+                {ai?.why ? (
+                  <span className="pill-ai-badge">🤖 {ai.why}</span>
+                ) : ai?.reviewNote ? (
+                  <span className="pill-ai-badge" style={{ background: "#fef9c3", color: "#92400e", border: "1px solid #fde68a" }}>⚠ {ai.reviewNote}</span>
                 ) : x.isAi ? (
                   <span className="pill-ai-badge">🤖 {x.matchedKeyword}</span>
                 ) : (
                   <span className="rule-tag">matched "{x.matchedKeyword}"</span>
                 )}
               </td>
+
               <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)", whiteSpace: "nowrap" }}>{show(x.total)}</td>
+
               <td>
                 <button
                   className={`ask-ai-row-btn ${rowAi?.countdown > 0 ? "rate-limited" : ""}`}
                   onClick={() => askAiForRow(x)}
                   disabled={rowAi?.loading || rowAi?.countdown > 0}
-                  title={rowAi?.countdown > 0 ? `Rate limited, retry in ${rowAi.countdown}s` : `Ask AI (${sharedModel || "Setup AI"})`}
+                  title={
+                    rowAi?.countdown > 0
+                      ? `Rate limited, retry in ${rowAi.countdown}s`
+                      : ai?.escalated
+                      ? `Checked by llama-3.3-70b-versatile (escalated)`
+                      : `AI second opinion (8B → 70B auto-escalate)`
+                  }
                 >
-                  {rowAi?.loading ? "..." : rowAi?.countdown > 0 ? `${rowAi.countdown}s` : "🤖"}
+                  {rowAi?.loading ? "..." : rowAi?.countdown > 0 ? `${rowAi.countdown}s` : ai ? "🔄" : "🤖"}
                 </button>
               </td>
             </tr>
