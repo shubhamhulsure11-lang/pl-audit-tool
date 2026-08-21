@@ -1,15 +1,24 @@
 import { NextResponse } from "next/server";
 
-// Standard production chat models only (NO reasoning models with <think> tokens, NO audio/embed/guard models)
-const SAFE_PREFIXES = ["llama", "mixtral", "gemma"];
-const EXCLUDE_PATTERNS = [
-  "whisper", "tts", "distil", "embed", "vision", "playai", "playht",
-  "guard", "canopylabs", "orpheus", "arabic", "preview", "speculative", "openai",
-  "deepseek", "qwen", "r1", "reasoning", "think"
+// Non-text/audio models that cannot be used for text analysis
+const EXCLUDED_PREFIXES = [
+  "whisper-",
+  "distil-whisper-",
+  "canopylabs/",
+  "playai-",
+  "playht-"
 ];
 
-// Preferred priority order
-const MODEL_PRIORITY = [
+const EXCLUDED_KEYWORDS = [
+  "whisper",
+  "tts",
+  "embedding",
+  "embed",
+  "guard"
+];
+
+// Preferred priority order for restaurant accounting audits
+const PREFERRED_ORDER = [
   "llama-3.1-8b-instant",
   "llama-3.3-70b-versatile",
   "llama-3.1-70b-versatile",
@@ -17,7 +26,9 @@ const MODEL_PRIORITY = [
   "llama3-8b-8192",
   "mixtral-8x7b-32768",
   "gemma2-9b-it",
-  "gemma-7b-it"
+  "gemma-7b-it",
+  "openai/gpt-oss-20b",
+  "openai/gpt-oss-120b"
 ];
 
 export async function POST(req) {
@@ -26,7 +37,8 @@ export async function POST(req) {
     if (!apiKey) return NextResponse.json({ error: "No API key provided." }, { status: 400 });
 
     const res = await fetch("https://api.groq.com/openai/v1/models", {
-      headers: { Authorization: `Bearer ${apiKey}` }
+      headers: { Authorization: `Bearer ${apiKey}` },
+      cache: "no-store"
     });
 
     if (res.status === 401) {
@@ -37,29 +49,30 @@ export async function POST(req) {
     }
 
     const data = await res.json();
-    const rawList = data.data || [];
+    const rawList = Array.isArray(data.data) ? data.data : [];
 
-    // Filter available models strictly
+    // Filter available models strictly to active text/chat models
     const filtered = rawList
+      .filter(m => m.active !== false)
       .map(m => m.id)
       .filter(id => {
         const lower = id.toLowerCase();
-        const isSafe = SAFE_PREFIXES.some(p => lower.startsWith(p));
-        const isExcluded = EXCLUDE_PATTERNS.some(p => lower.includes(p));
-        return isSafe && !isExcluded;
+        const hasBadPrefix = EXCLUDED_PREFIXES.some(p => lower.startsWith(p));
+        const hasBadKeyword = EXCLUDED_KEYWORDS.some(k => lower.includes(k));
+        return !hasBadPrefix && !hasBadKeyword;
       });
 
     // Sort according to preferred production priority
     filtered.sort((a, b) => {
-      const aIdx = MODEL_PRIORITY.findIndex(p => a.toLowerCase().includes(p.toLowerCase()));
-      const bIdx = MODEL_PRIORITY.findIndex(p => b.toLowerCase().includes(p.toLowerCase()));
-      const aScore = aIdx >= 0 ? aIdx : 99;
-      const bScore = bIdx >= 0 ? bIdx : 99;
+      const aIdx = PREFERRED_ORDER.findIndex(p => a.toLowerCase().includes(p.toLowerCase()));
+      const bIdx = PREFERRED_ORDER.findIndex(p => b.toLowerCase().includes(p.toLowerCase()));
+      const aScore = aIdx >= 0 ? aIdx : 999;
+      const bScore = bIdx >= 0 ? bIdx : 999;
       return aScore - bScore;
     });
 
     if (!filtered.length) {
-      return NextResponse.json({ error: "No compatible production chat models found for this Groq key." }, { status: 400 });
+      return NextResponse.json({ error: "No text/chat models found for this Groq key." }, { status: 400 });
     }
 
     return NextResponse.json({ models: filtered });
