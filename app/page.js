@@ -1680,6 +1680,7 @@ export default function Home() {
                   </tr>
                 )) : <tr><td colSpan="5"><Empty>No price exceptions found.</Empty></td></tr>}
               </Table>
+              {result.prices.length > 0 && <CopyPriceExceptionsButton prices={result.prices} />}
             </section>
           )}
         </>
@@ -1737,6 +1738,9 @@ function Changes({ title, rows, field, threshold }) {
           </tr>
         )) : <tr><td colSpan="5"><Empty>No material movements found.</Empty></td></tr>}
       </Table>
+      {rows.length > 0 && (
+        <CopyChangesButton title={title} rows={rows} field={field} threshold={threshold} />
+      )}
     </section>
   );
 }
@@ -1798,3 +1802,128 @@ function CopyDuplicatesButton({ duplicates }) {
     </div>
   );
 }
+
+function CopyChangesButton({ title, rows, field, threshold }) {
+  const [copied, setCopied] = useState(false);
+
+  function buildText() {
+    const colW = [30, 20, 20, 16, 12];
+    const pad = (s, w) => String(s ?? "—").padEnd(w).slice(0, w);
+    const lines = [];
+    lines.push(`${title.toUpperCase()} REPORT (${threshold}%+ change or new entry)`);
+    lines.push("=".repeat(98));
+    lines.push(
+      pad(field, colW[0]) +
+      pad("Current month", colW[1]) +
+      pad("Previous month", colW[2]) +
+      pad("Change", colW[3]) +
+      pad("Status", colW[4])
+    );
+    lines.push("-".repeat(98));
+    rows.forEach(x => {
+      const diffStr = (x.diff >= 0 ? "+" : "") + show(x.diff);
+      lines.push(
+        pad(x.label, colW[0]) +
+        pad(show(x.total), colW[1]) +
+        pad(show(x.old), colW[2]) +
+        pad(diffStr, colW[3]) +
+        pad(x.status, colW[4])
+      );
+    });
+    lines.push("=".repeat(98));
+    lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
+    return lines.join("\n");
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(buildText()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 0 2px 0" }}>
+      <button
+        onClick={handleCopy}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 7,
+          padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)",
+          background: copied ? "var(--green, #27ae60)" : "var(--surface)",
+          color: copied ? "#fff" : "var(--text)",
+          fontWeight: 600, fontSize: "0.82rem", cursor: "pointer",
+          transition: "background 0.25s, color 0.25s",
+        }}
+      >
+        {copied ? (
+          <><span>✓</span> Copied!</>
+        ) : (
+          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Accountant</>
+        )}
+      </button>
+    </div>
+  );
+}
+
+function CopyPriceExceptionsButton({ prices }) {
+  const [copied, setCopied] = useState(false);
+
+  function buildText() {
+    const colW = [26, 26, 16, 16, 12];
+    const pad = (s, w) => String(s ?? "—").padEnd(w).slice(0, w);
+    const lines = [];
+    lines.push("PRICE EXCEPTIONS REPORT (purchased above weighted average)");
+    lines.push("=".repeat(96));
+    lines.push(
+      pad("Item", colW[0]) +
+      pad("Vendor", colW[1]) +
+      pad("Rate paid", colW[2]) +
+      pad("Weighted avg", colW[3]) +
+      pad("Variance", colW[4])
+    );
+    lines.push("-".repeat(96));
+    prices.forEach(x => {
+      const varStr = `+${(x.pct * 100).toFixed(0)}%`;
+      lines.push(
+        pad(x.item, colW[0]) +
+        pad(x.vendor, colW[1]) +
+        pad(show(x.rate), colW[2]) +
+        pad(show(x.avg), colW[3]) +
+        pad(varStr, colW[4])
+      );
+    });
+    lines.push("=".repeat(96));
+    lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
+    return lines.join("\n");
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(buildText()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 0 2px 0" }}>
+      <button
+        onClick={handleCopy}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 7,
+          padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)",
+          background: copied ? "var(--green, #27ae60)" : "var(--surface)",
+          color: copied ? "#fff" : "var(--text)",
+          fontWeight: 600, fontSize: "0.82rem", cursor: "pointer",
+          transition: "background 0.25s, color 0.25s",
+        }}
+      >
+        {copied ? (
+          <><span>✓</span> Copied!</>
+        ) : (
+          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Accountant</>
+        )}
+      </button>
+    </div>
+  );
+}
+
