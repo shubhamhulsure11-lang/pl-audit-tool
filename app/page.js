@@ -8,6 +8,15 @@ import {
   auditZomatoReconciliation,
   auditSwiggyReconciliation,
 } from "./lib/reconciliation";
+import {
+  runZomatoRecon,
+  runSwiggyRecon,
+  runDineoutRecon,
+  runZomatoPayRecon,
+  runPaytmRecon,
+  runPosCleaner,
+  exportReconWorkbook,
+} from "./lib/reconEngines";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const clean = (v) => String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1929,151 +1938,575 @@ function CopyPriceExceptionsButton({ prices }) {
 
 
 function SalesReconciliationView() {
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState("");
-    const [classifiedFiles, setClassifiedFiles] = useState(null);
-    const [zomatoAudit, setZomatoAudit] = useState(null);
-    const [swiggyAudit, setSwiggyAudit] = useState(null);
-    const [copySuccess, setCopySuccess] = useState(null);
+  const [platform, setPlatform] = useState("zomato"); // zomato | swiggy | dineout | zpay | paytm | pos | zip
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [clientName, setClientName] = useState("Kailash Parbat");
+  const [month, setMonth] = useState("July");
+  const [zomatoMode, setZomatoMode] = useState("weekly"); // weekly | consolidated
+  
+  // Week range states
+  const [fStart, setFStart] = useState(1);
+  const [fEnd, setFEnd] = useState(7);
+  const [lStart, setLStart] = useState(29);
+  const [lEnd, setLEnd] = useState(31);
 
-    const handleFileUpload = async (file) => {
-      setLoading(true);
-      setError("");
-      try {
-        const extracted = await extractZipRecursively(file);
-        if (extracted.length === 0) {
-          throw new Error("No files found inside the uploaded zip archive.");
+  // Uploaded files states
+  const [invoiceFiles, setInvoiceFiles] = useState([]);
+  const [bankFile, setBankFile] = useState(null);
+  const [adsFiles, setAdsFiles] = useState([]);
+  const [posFile, setPosFile] = useState(null);
+  const [zipFile, setZipFile] = useState(null);
+
+  // Result reports
+  const [report, setReport] = useState(null);
+  const [posReport, setPosReport] = useState(null);
+  const [zipReport, setZipReport] = useState(null);
+  const [copySuccess, setCopySuccess] = useState("");
+
+  const months = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December"
+  ];
+
+  const resetAll = () => {
+    setReport(null);
+    setPosReport(null);
+    setZipReport(null);
+    setError("");
+    setInvoiceFiles([]);
+    setBankFile(null);
+    setAdsFiles([]);
+    setPosFile(null);
+    setZipFile(null);
+  };
+
+  const handleExecute = async () => {
+    setLoading(true);
+    setError("");
+    setReport(null);
+    setPosReport(null);
+    setZipReport(null);
+
+    try {
+      if (platform === "pos") {
+        if (!posFile) throw new Error("Please upload a POS report file (.xlsx / .xls)");
+        const res = await runPosCleaner({
+          file: posFile,
+          firstWeekStart: fStart,
+          firstWeekEnd: fEnd,
+          lastWeekStart: lStart,
+          lastWeekEnd: lEnd,
+        });
+        setPosReport(res);
+      } else if (platform === "zip") {
+        if (!zipFile) throw new Error("Please upload a deliverables .zip archive");
+        const extracted = await extractZipRecursively(zipFile);
+        if (extracted.length === 0) throw new Error("No files found inside the uploaded zip archive.");
+        const classified = classifyDeliverableFiles(extracted);
+        const zAudit = auditZomatoReconciliation(classified.zomatoRaw, classified.pos, classified.zomatoSummaries);
+        const sAudit = auditSwiggyReconciliation(classified.swiggyRaw, classified.pos, classified.swiggySummaries);
+        setZipReport({ classified, zomato: zAudit, swiggy: sAudit });
+      } else {
+        if (invoiceFiles.length === 0) {
+          throw new Error(`Please upload at least one ${platform.toUpperCase()} invoice/settlement file`);
         }
 
-        const classified = classifyDeliverableFiles(extracted);
-        setClassifiedFiles(classified);
+        let res;
+        const opts = {
+          files: invoiceFiles,
+          bankFile,
+          clientName: clientName || "Client",
+          month,
+          firstWeekStart: fStart,
+          firstWeekEnd: fEnd,
+          lastWeekStart: lStart,
+          lastWeekEnd: lEnd,
+        };
 
-        const zAudit = auditZomatoReconciliation(
-          classified.zomatoRaw,
-          classified.pos,
-          classified.zomatoSummaries
-        );
-        const sAudit = auditSwiggyReconciliation(
-          classified.swiggyRaw,
-          classified.pos,
-          classified.swiggySummaries
-        );
+        if (platform === "zomato") {
+          res = await runZomatoRecon({ ...opts, mode: zomatoMode });
+        } else if (platform === "swiggy") {
+          res = await runSwiggyRecon(opts);
+        } else if (platform === "dineout") {
+          res = await runDineoutRecon(opts);
+        } else if (platform === "zpay") {
+          res = await runZomatoPayRecon({ ...opts, adsFiles });
+        } else if (platform === "paytm") {
+          res = await runPaytmRecon(opts);
+        }
 
-        setZomatoAudit(zAudit);
-        setSwiggyAudit(sAudit);
-      } catch (err) {
-        setError(err.message || "Failed to process zip deliverables.");
-      } finally {
-        setLoading(false);
+        setReport(res);
       }
-    };
+    } catch (err) {
+      console.error(err);
+      setError(err.message || "An error occurred during reconciliation processing.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    const resetAudit = () => {
-      setClassifiedFiles(null);
-      setZomatoAudit(null);
-      setSwiggyAudit(null);
-      setError("");
-    };
+  const copyTsv = () => {
+    if (!report) return;
+    const lines = [];
+    lines.push([`Client: ${report.clientName}`, `Platform: ${report.platform}`, `Month: ${report.month}`].join("\t"));
+    lines.push("");
 
-    const copyDiscrepancies = (audit, platformName) => {
-      const lines = [`${platformName.toUpperCase()} RECONCILIATION DISCREPANCY AUDIT`];
-      lines.push("=".repeat(80));
-      lines.push("");
-
-      audit.weeks.forEach(w => {
-        lines.push(`Period: ${w.label}`);
-        lines.push(`- Sales: Accountant: ${show(w.accountant.sales)} | Calculated: ${show(w.calculated.sales)} (POS: ${show(w.pos.sales)}) | Diff: ${show(w.discrepancy.sales)}`);
-        lines.push(`- Commission: Accountant: ${show(w.accountant.commission)} | Calculated: ${show(w.calculated.commission)} | Diff: ${show(w.discrepancy.commission)}`);
-        lines.push(`- Net Payout: Accountant: ${show(w.accountant.payout)} | Calculated: ${show(w.calculated.payout)} | Diff: ${show(w.discrepancy.payout)}`);
-        
-        const hasErr = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
-        lines.push(`Status: ${hasErr ? "⚠️ Discrepancy Found" : "✅ Match"}`);
-        lines.push("-".repeat(80));
+    if (report.platform === "Zomato" || report.platform === "Swiggy") {
+      lines.push(["Week / Period", "Orders", "Gross Sales", "Discounts", "GST", "Commission", "Other Deductions", "Expected Payout", "Bank Actual", "Variance", "Status"].join("\t"));
+      report.weeks.forEach(w => {
+        lines.push([
+          w.label,
+          w.orders,
+          w.grossSales || w.totalIncome,
+          w.discounts,
+          w.gstCollected,
+          w.commission,
+          w.otherDeductions || w.taxesAndDeductions,
+          w.expectedPayout,
+          w.bankActual,
+          w.bankDiff,
+          w.bankMatched ? "Match" : "Discrepancy"
+        ].join("\t"));
       });
-
-      lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
-      navigator.clipboard.writeText(lines.join("\n")).then(() => {
-        setCopySuccess(platformName);
-        setTimeout(() => setCopySuccess(null), 2500);
+      lines.push([
+        report.total.label,
+        report.total.orders,
+        report.total.grossSales || report.total.totalIncome,
+        report.total.discounts,
+        report.total.gstCollected,
+        report.total.commission,
+        report.total.otherDeductions || report.total.taxesAndDeductions,
+        report.total.expectedPayout,
+        report.total.bankActual,
+        report.total.bankDiff,
+        report.total.bankMatched ? "All Matched" : "Discrepancy"
+      ].join("\t"));
+    } else {
+      lines.push(["Week / Period", "Sales Excl. GST", "Discounts", "GST 5%", "Sales Incl. GST", "Commission", "Expected Payout", "Bank Actual", "Variance", "Status"].join("\t"));
+      report.weeks.forEach(w => {
+        lines.push([
+          w.label,
+          w.salesExclGst || w.salesExclGstBefore,
+          w.discounts,
+          w.gst5Pct,
+          w.salesInclGst || w.salesAfterFailed,
+          w.commission || w.commissionInclGst,
+          w.expectedPayout || w.expectedReceipt,
+          w.bankActual,
+          w.bankDiff,
+          w.bankMatched ? "Match" : "Discrepancy"
+        ].join("\t"));
       });
-    };
+      lines.push([
+        report.total.label,
+        report.total.salesExclGst || report.total.salesExclGstBefore,
+        report.total.discounts,
+        report.total.gst5Pct,
+        report.total.salesInclGst || report.total.salesAfterFailed,
+        report.total.commission || report.total.commissionInclGst,
+        report.total.expectedPayout || report.total.expectedReceipt,
+        report.total.bankActual,
+        report.total.bankDiff,
+        report.total.bankMatched ? "All Matched" : "Discrepancy"
+      ].join("\t"));
+    }
 
-    if (loading) {
-      return (
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, background: "#fff", border: "1px solid var(--line)", padding: 40 }}>
-          <div style={{ border: "4px solid #f3f3f3", borderTop: "4px solid var(--forest)", borderRadius: "50%", width: 40, height: 40, animation: "spin 1s linear infinite" }} />
-          <strong style={{ marginTop: 20, color: "var(--forest)" }}>Analyzing Deliverables Folder...</strong>
-          <small style={{ color: "var(--muted)", marginTop: 8 }}>Extracting nested zips, classifying files, and running sales reconciliation math.</small>
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setCopySuccess("tsv");
+      setTimeout(() => setCopySuccess(""), 2500);
+    });
+  };
+
+  const copyNotes = () => {
+    if (!report) return;
+    const lines = [
+      `=======================================================`,
+      `  ${report.platform.toUpperCase()} RECONCILIATION AUDIT SUMMARY`,
+      `  Client: ${report.clientName} | Period: ${report.month}`,
+      `  Generated on: ${new Date().toLocaleString("en-IN")}`,
+      `=======================================================`,
+      "",
+    ];
+
+    report.weeks.forEach((w) => {
+      const isDisc = !w.bankMatched && report.hasBank;
+      lines.push(`Period: ${w.label}  ${isDisc ? "⚠️ DISCREPANCY" : "✅ OK"}`);
+      lines.push(`- Gross Sales: ${show(w.grossSales || w.totalIncome || w.salesInclGst)}`);
+      lines.push(`- Platform Commission: ${show(w.commission || w.commissionInclGst)}`);
+      lines.push(`- Net Payout Expected: ${show(w.expectedPayout || w.expectedReceipt)}`);
+      if (report.hasBank) {
+        lines.push(`- Bank Actual Receipt: ${show(w.bankActual)} (Diff: ${show(w.bankDiff)})`);
+      }
+      if (w.utr && w.utr !== "—") lines.push(`- Bank UTR / CTR: ${w.utr}`);
+      lines.push(`-------------------------------------------------------`);
+    });
+
+    lines.push(`TOTAL SUMMARY:`);
+    lines.push(`Total Sales: ${show(report.total.grossSales || report.total.totalIncome || report.total.salesInclGst)}`);
+    lines.push(`Total Commission: ${show(report.total.commission || report.total.commissionInclGst)}`);
+    lines.push(`Total Expected Net: ${show(report.total.expectedPayout || report.total.expectedReceipt)}`);
+    if (report.hasBank) {
+      lines.push(`Total Bank Actual: ${show(report.total.bankActual)} (Variance: ${show(report.total.bankDiff)})`);
+    }
+
+    navigator.clipboard.writeText(lines.join("\n")).then(() => {
+      setCopySuccess("notes");
+      setTimeout(() => setCopySuccess(""), 2500);
+    });
+  };
+
+  const tabs = [
+    { id: "zomato", label: "Zomato", icon: "🔴", desc: "Weekly & Consolidated Payouts" },
+    { id: "swiggy", label: "Swiggy", icon: "🟠", desc: "Order Level & Deductions" },
+    { id: "dineout", label: "Swiggy Dineout", icon: "🍽️", desc: "Dineout Settlement Recon" },
+    { id: "zpay", label: "Zomato Pay", icon: "💳", desc: "Transactions & Ads Recon" },
+    { id: "paytm", label: "Paytm", icon: "🔷", desc: "MDR & Settlement Recon" },
+    { id: "pos", label: "POS Extractor", icon: "📊", desc: "Petpooja / Posist Sales Channel" },
+    { id: "zip", label: "Deliverables Zip", icon: "📦", desc: "Full Auto Audit Archive" },
+  ];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 24, paddingBottom: 60 }}>
+      {/* Sub-Tabs Selector */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, background: "var(--surface)", padding: 6, borderRadius: 12, border: "1px solid var(--line)" }}>
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => { setPlatform(t.id); resetAll(); }}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "10px 18px",
+              borderRadius: 8,
+              border: platform === t.id ? "1px solid var(--forest)" : "1px solid transparent",
+              background: platform === t.id ? "var(--forest)" : "transparent",
+              color: platform === t.id ? "#fff" : "var(--text)",
+              fontWeight: 600,
+              fontSize: "0.84rem",
+              cursor: "pointer",
+              transition: "0.15s",
+            }}
+          >
+            <span>{t.icon}</span>
+            <span>{t.label}</span>
+          </button>
+        ))}
+      </div>
+
+      {/* Loading View */}
+      {loading && (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 340, background: "#fff", borderRadius: 12, border: "1px solid var(--line)", padding: 40, gap: 16 }}>
+          <div style={{ width: 48, height: 48, border: "4px solid var(--lime)", borderTop: "4px solid var(--forest)", borderRadius: "50%", animation: "spin 0.9s linear infinite" }} />
+          <strong style={{ color: "var(--forest)", fontSize: "1.1rem" }}>Executing {platform.toUpperCase()} Reconciliation...</strong>
+          <small style={{ color: "var(--muted)" }}>Parsing multi-week orders, computing GST formulas, matching bank settlements & flagging variances</small>
           <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
         </div>
-      );
-    }
+      )}
 
-    if (zomatoAudit || swiggyAudit) {
-      const totalDiscrepancies = 
-        (zomatoAudit?.weeks.filter(w => w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0).length || 0) +
-        (swiggyAudit?.weeks.filter(w => w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0).length || 0);
-
-      return (
+      {/* Report View (Visible directly on screen!) */}
+      {!loading && report && (
         <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
-          <section className="run" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--forest)", color: "#fff", padding: "16px 18px" }}>
+          {/* Header Bar */}
+          <section className="run" style={{ background: "var(--forest)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: 12, padding: "18px 24px" }}>
             <div>
-              <strong>Sales Reconciliation Audit Completed</strong>
-              <small>POS, Swiggy, and Zomato files cross-checked against accountant summary sheets</small>
+              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                <strong style={{ fontSize: "1.2rem" }}>{report.clientName} — {report.platform} Reconciliation</strong>
+                <span style={{ background: "rgba(255,255,255,0.2)", padding: "2px 8px", borderRadius: 4, fontSize: "0.75rem" }}>{report.month}</span>
+                {report.mode && <span style={{ background: "var(--lime)", color: "var(--forest)", padding: "2px 8px", borderRadius: 4, fontSize: "0.75rem", fontWeight: 700 }}>{report.mode.toUpperCase()}</span>}
+              </div>
+              <small style={{ display: "block", opacity: 0.8, marginTop: 4 }}>
+                {report.weeks.length} Weeks Audited · {report.filesCount} Source Invoices Processed · {report.hasBank ? "Bank Statement Verified" : "No Bank Statement Attached"}
+              </small>
             </div>
-            <button onClick={resetAudit} style={{ border: "1px solid #77978a", background: "transparent", color: "#fff", padding: "9px 12px", cursor: "pointer" }}>Start New Audit</button>
+            <div style={{ display: "flex", gap: 10 }}>
+              <button onClick={() => exportReconWorkbook(report)} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}>
+                📥 Download Excel (.xlsx)
+              </button>
+              <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}>
+                🔄 Start New Recon
+              </button>
+            </div>
           </section>
 
+          {/* Metric Summary Cards */}
           <section className="metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
-            <Card label="Discrepancies Found" value={totalDiscrepancies} warm={totalDiscrepancies > 0} />
-            <Card label="POS Reports Loaded" value={classifiedFiles?.pos.length || "0"} />
-            <Card label="Zomato Raw Invoices" value={classifiedFiles?.zomatoRaw.length || "0"} />
-            <Card label="Swiggy Raw Invoices" value={classifiedFiles?.swiggyRaw.length || "0"} />
+            <Card label="Total Gross Sales" value={show(report.total.grossSales || report.total.totalIncome || report.total.salesInclGst)} />
+            <Card label="Platform Commission" value={show(report.total.commission || report.total.commissionInclGst)} />
+            <Card label="Expected Net Payout" value={show(report.total.expectedPayout || report.total.expectedReceipt)} />
+            {report.hasBank ? (
+              <Card
+                label="Bank Actual Variance"
+                value={show(report.total.bankDiff)}
+                warm={report.total.bankDiff !== 0}
+              />
+            ) : (
+              <Card label="Total Orders" value={report.total.orders || "—"} />
+            )}
           </section>
 
-          {zomatoAudit && zomatoAudit.weeks.length > 0 && (
-            <section className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
-              <div className="panelhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 24 }}>
-                <div>
-                  <p className="eyebrow">ZOMATO RECONCILIATION AUDIT</p>
-                  <h2>Zomato Summary Verification</h2>
-                </div>
-                <button className="pivot-btn" onClick={() => copyDiscrepancies(zomatoAudit, "Zomato")}>
-                  {copySuccess === "Zomato" ? "✓ Copied!" : "📋 Copy Audit Notes"}
+          {/* Comprehensive On-Screen Table */}
+          <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
+              <div>
+                <p className="eyebrow">AUDITOR RECONCILIATION SPREADSHEET</p>
+                <h2 style={{ margin: 0, fontSize: "1.3rem" }}>Multi-Week Financial Breakdown</h2>
+              </div>
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="pivot-btn" onClick={copyTsv}>
+                  {copySuccess === "tsv" ? "✓ Copied Table!" : "📋 Copy Table for Sheets"}
+                </button>
+                <button className="pivot-btn" onClick={copyNotes}>
+                  {copySuccess === "notes" ? "✓ Copied Notes!" : "📋 Copy Discrepancy Notes"}
                 </button>
               </div>
+            </div>
 
-              <div className="table" style={{ overflowX: "auto", borderTop: "1px solid var(--line)" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                <thead>
+                  <tr style={{ background: "#f7fbf8", borderBottom: "2px solid var(--line)" }}>
+                    <th style={{ padding: "12px 16px", textAlign: "left" }}>Week / Period</th>
+                    {report.platform === "Zomato" || report.platform === "Swiggy" ? (
+                      <>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Orders</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Gross Sales</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Discounts</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>GST Collected</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Commission</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Other Deductions</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700 }}>Expected Payout</th>
+                        {report.hasBank && <th style={{ padding: "12px 16px", textAlign: "right" }}>Bank Actual</th>}
+                        {report.hasBank && <th style={{ padding: "12px 16px", textAlign: "right" }}>Variance</th>}
+                        <th style={{ padding: "12px 16px", textAlign: "center" }}>UTR / Status</th>
+                      </>
+                    ) : (
+                      <>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Sales (Excl. GST)</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Discounts</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>GST 5%</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Sales (Incl. GST)</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right" }}>Commission</th>
+                        <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700 }}>Expected Net</th>
+                        {report.hasBank && <th style={{ padding: "12px 16px", textAlign: "right" }}>Bank Actual</th>}
+                        {report.hasBank && <th style={{ padding: "12px 16px", textAlign: "right" }}>Variance</th>}
+                        <th style={{ padding: "12px 16px", textAlign: "center" }}>Status</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.weeks.map((w, idx) => {
+                    const hasVar = report.hasBank && !w.bankMatched;
+                    return (
+                      <tr key={idx} style={{ borderBottom: "1px solid var(--line)", background: hasVar ? "#fff8f8" : "transparent" }}>
+                        <td style={{ padding: "14px 16px", fontWeight: 700 }}>{w.label}</td>
+                        {report.platform === "Zomato" || report.platform === "Swiggy" ? (
+                          <>
+                            <td style={{ padding: "14px 16px", textAlign: "right", color: "var(--muted)" }}>{w.orders}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 600 }}>{show(w.grossSales || w.totalIncome)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", color: "#c0392b" }}>-{show(w.discounts)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.gstCollected)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", color: "#c0392b" }}>-{show(w.commission)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", color: "var(--muted)" }}>-{show(w.otherDeductions || w.taxesAndDeductions)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 700, color: "var(--forest)" }}>{show(w.expectedPayout)}</td>
+                            {report.hasBank && <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.bankActual)}</td>}
+                            {report.hasBank && (
+                              <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 700, color: w.bankDiff === 0 ? "var(--muted)" : "#c0392b" }}>
+                                {w.bankDiff === 0 ? "0" : show(w.bankDiff)}
+                              </td>
+                            )}
+                            <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                              {report.hasBank ? (
+                                <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: w.bankMatched ? "#edf8f0" : "#feeceb", color: w.bankMatched ? "#1a6f3b" : "#a43024" }}>
+                                  {w.bankMatched ? "Match" : "Discrepancy"}
+                                </span>
+                              ) : (
+                                <span style={{ fontSize: "11px", color: "var(--muted)" }}>{w.utr || "—"}</span>
+                              )}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.salesExclGst || w.salesExclGstBefore)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", color: "#c0392b" }}>-{show(w.discounts)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.gst5Pct)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 600 }}>{show(w.salesInclGst || w.salesAfterFailed)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", color: "#c0392b" }}>-{show(w.commission || w.commissionInclGst)}</td>
+                            <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 700, color: "var(--forest)" }}>{show(w.expectedPayout || w.expectedReceipt)}</td>
+                            {report.hasBank && <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.bankActual)}</td>}
+                            {report.hasBank && (
+                              <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 700, color: w.bankDiff === 0 ? "var(--muted)" : "#c0392b" }}>
+                                {w.bankDiff === 0 ? "0" : show(w.bankDiff)}
+                              </td>
+                            )}
+                            <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                              <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: w.bankMatched ? "#edf8f0" : "#feeceb", color: w.bankMatched ? "#1a6f3b" : "#a43024" }}>
+                                {w.bankMatched ? "Match" : "Discrepancy"}
+                              </span>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    );
+                  })}
+
+                  {/* Total Row */}
+                  <tr style={{ background: "#f0f6f2", fontWeight: 700, borderTop: "2px solid var(--forest)" }}>
+                    <td style={{ padding: "16px" }}>{report.total.label}</td>
+                    {report.platform === "Zomato" || report.platform === "Swiggy" ? (
+                      <>
+                        <td style={{ padding: "16px", textAlign: "right" }}>{report.total.orders}</td>
+                        <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.grossSales || report.total.totalIncome)}</td>
+                        <td style={{ padding: "16px", textAlign: "right", color: "#c0392b" }}>-{show(report.total.discounts)}</td>
+                        <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.gstCollected)}</td>
+                        <td style={{ padding: "16px", textAlign: "right", color: "#c0392b" }}>-{show(report.total.commission)}</td>
+                        <td style={{ padding: "16px", textAlign: "right" }}>-{show(report.total.otherDeductions || report.total.taxesAndDeductions)}</td>
+                        <td style={{ padding: "16px", textAlign: "right", color: "var(--forest)" }}>{show(report.total.expectedPayout)}</td>
+                        {report.hasBank && <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.bankActual)}</td>}
+                        {report.hasBank && <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.bankDiff)}</td>}
+                        <td style={{ padding: "16px", textAlign: "center" }}>
+                          {report.hasBank && (
+                            <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: report.total.bankMatched ? "#edf8f0" : "#feeceb", color: report.total.bankMatched ? "#1a6f3b" : "#a43024" }}>
+                              {report.total.bankMatched ? "ALL MATCHED" : "DISCREPANCY"}
+                            </span>
+                          )}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.salesExclGst || report.total.salesExclGstBefore)}</td>
+                        <td style={{ padding: "16px", textAlign: "right", color: "#c0392b" }}>-{show(report.total.discounts)}</td>
+                        <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.gst5Pct)}</td>
+                        <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.salesInclGst || report.total.salesAfterFailed)}</td>
+                        <td style={{ padding: "16px", textAlign: "right", color: "#c0392b" }}>-{show(report.total.commission || report.total.commissionInclGst)}</td>
+                        <td style={{ padding: "16px", textAlign: "right", color: "var(--forest)" }}>{show(report.total.expectedPayout || report.total.expectedReceipt)}</td>
+                        {report.hasBank && <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.bankActual)}</td>}
+                        {report.hasBank && <td style={{ padding: "16px", textAlign: "right" }}>{show(report.total.bankDiff)}</td>}
+                        <td style={{ padding: "16px", textAlign: "center" }}>
+                          <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: report.total.bankMatched ? "#edf8f0" : "#feeceb", color: report.total.bankMatched ? "#1a6f3b" : "#a43024" }}>
+                            {report.total.bankMatched ? "ALL MATCHED" : "DISCREPANCY"}
+                          </span>
+                        </td>
+                      </>
+                    )}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* POS Extractor Report */}
+      {!loading && posReport && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          <section className="run" style={{ background: "var(--forest)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: 12, padding: "18px 24px" }}>
+            <div>
+              <strong style={{ fontSize: "1.2rem" }}>POS Sales Channel Breakdown</strong>
+              <small style={{ display: "block", opacity: 0.8, marginTop: 4 }}>File: {posReport.fileName} · Total Extracted: {show(posReport.grandTotal)}</small>
+            </div>
+            <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+              🔄 New POS Extraction
+            </button>
+          </section>
+
+          <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+            <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
+              <p className="eyebrow">PAYMENT TYPE & WEEKLY MATRIX</p>
+              <h2 style={{ margin: 0 }}>Channel Sales Matrix</h2>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+                <thead>
+                  <tr style={{ background: "#f7fbf8", borderBottom: "2px solid var(--line)" }}>
+                    <th style={{ padding: "12px 16px", textAlign: "left" }}>Payment Channel</th>
+                    {posReport.weekRanges.map((w) => (
+                      <th key={w.weekNum} style={{ padding: "12px 16px", textAlign: "right" }}>{w.label}</th>
+                    ))}
+                    <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700 }}>Total Sales</th>
+                    <th style={{ padding: "12px 16px", textAlign: "right" }}>Orders</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {posReport.channels.map((ch, idx) => (
+                    <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
+                      <td style={{ padding: "14px 16px", fontWeight: 700 }}>{ch.channel}</td>
+                      {ch.weeks.map((w, wIdx) => (
+                        <td key={wIdx} style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.amount)}</td>
+                      ))}
+                      <td style={{ padding: "14px 16px", textAlign: "right", fontWeight: 700, color: "var(--forest)" }}>{show(ch.total)}</td>
+                      <td style={{ padding: "14px 16px", textAlign: "right", color: "var(--muted)" }}>{ch.totalOrders}</td>
+                    </tr>
+                  ))}
+                  <tr style={{ background: "#f0f6f2", fontWeight: 700, borderTop: "2px solid var(--forest)" }}>
+                    <td style={{ padding: "16px" }}>Grand Total</td>
+                    {posReport.weekRanges.map((w, idx) => {
+                      const weekSum = posReport.channels.reduce((s, c) => s + (c.weeks[idx]?.amount || 0), 0);
+                      return <td key={idx} style={{ padding: "16px", textAlign: "right" }}>{show(weekSum)}</td>;
+                    })}
+                    <td style={{ padding: "16px", textAlign: "right", color: "var(--forest)" }}>{show(posReport.grandTotal)}</td>
+                    <td style={{ padding: "16px", textAlign: "right" }}>{posReport.grandOrders}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Deliverables Zip Report */}
+      {!loading && zipReport && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          <section className="run" style={{ background: "var(--forest)", color: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", borderRadius: 12, padding: "18px 24px" }}>
+            <div>
+              <strong style={{ fontSize: "1.2rem" }}>Deliverables Zip Auto-Audit Completed</strong>
+              <small style={{ display: "block", opacity: 0.8, marginTop: 4 }}>
+                {zipReport.classified.swiggyRaw.length} Swiggy · {zipReport.classified.zomatoRaw.length} Zomato · {zipReport.classified.pos.length} POS Files Cross-Checked
+              </small>
+            </div>
+            <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+              🔄 Audit Another Zip
+            </button>
+          </section>
+
+          {/* Swiggy Audit Summary */}
+          {zipReport.swiggy && zipReport.swiggy.weeks.length > 0 && (
+            <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+              <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
+                <p className="eyebrow">SWIGGY RECONCILIATION AUDIT</p>
+                <h2 style={{ margin: 0 }}>Swiggy Accountant vs Calculated</h2>
+              </div>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
                   <thead>
-                    <tr style={{ background: "#fafcf9" }}>
-                      <th style={{ padding: "12px 18px", textAlign: "left" }}>Week</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Sales</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Sales (POS)</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Comm.</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Comm.</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Payout</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Payout</th>
-                      <th style={{ padding: "12px 18px", textAlign: "center" }}>Status</th>
+                    <tr style={{ background: "#f7fbf8", borderBottom: "2px solid var(--line)" }}>
+                      <th style={{ padding: "12px 16px", textAlign: "left" }}>Week</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Accountant Sales</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Calculated Sales</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Accountant Comm.</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Calculated Comm.</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Accountant Payout</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Calculated Payout</th>
+                      <th style={{ padding: "12px 16px", textAlign: "center" }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {zomatoAudit.weeks.map((w, idx) => {
-                      const hasErr = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
+                    {zipReport.swiggy.weeks.map((w, idx) => {
+                      const bad = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
                       return (
-                        <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
-                          <td style={{ padding: "14px 18px", fontWeight: "600" }}>{w.label}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.sales)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.sales !== 0 ? "var(--red)" : "inherit" }}>
-                            {show(w.calculated.sales)} {w.pos.sales > 0 && <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>(POS: {show(w.pos.sales)})</span>}
-                          </td>
-                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.commission)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.commission !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.commission)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.payout)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.payout !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.payout)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "center" }}>
-                            <span className={`pill ${hasErr ? "critical" : ""}`} style={{ background: hasErr ? "#feeceb" : "#edf8f0", color: hasErr ? "#a43024" : "#1a6f3b", padding: "4px 8px", borderRadius: 4, fontSize: "11px", fontWeight: "600" }}>
-                              {hasErr ? "Discrepancy" : "Match"}
+                        <tr key={idx} style={{ borderBottom: "1px solid var(--line)", background: bad ? "#fff8f8" : "transparent" }}>
+                          <td style={{ padding: "14px 16px", fontWeight: 700 }}>{w.label}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.accountant.sales)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right", color: w.discrepancy.sales !== 0 ? "#c0392b" : "inherit" }}>{show(w.calculated.sales)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.accountant.commission)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right", color: w.discrepancy.commission !== 0 ? "#c0392b" : "inherit" }}>{show(w.calculated.commission)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.accountant.payout)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right", color: w.discrepancy.payout !== 0 ? "#c0392b" : "inherit" }}>{show(w.calculated.payout)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                            <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: bad ? "#feeceb" : "#edf8f0", color: bad ? "#a43024" : "#1a6f3b" }}>
+                              {bad ? "Discrepancy" : "Match"}
                             </span>
                           </td>
                         </tr>
@@ -2085,49 +2518,42 @@ function SalesReconciliationView() {
             </section>
           )}
 
-          {swiggyAudit && swiggyAudit.weeks.length > 0 && (
-            <section className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
-              <div className="panelhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 24 }}>
-                <div>
-                  <p className="eyebrow">SWIGGY RECONCILIATION AUDIT</p>
-                  <h2>Swiggy Summary Verification</h2>
-                </div>
-                <button className="pivot-btn" onClick={() => copyDiscrepancies(swiggyAudit, "Swiggy")}>
-                  {copySuccess === "Swiggy" ? "✓ Copied!" : "📋 Copy Audit Notes"}
-                </button>
+          {/* Zomato Audit Summary */}
+          {zipReport.zomato && zipReport.zomato.weeks.length > 0 && (
+            <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+              <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
+                <p className="eyebrow">ZOMATO RECONCILIATION AUDIT</p>
+                <h2 style={{ margin: 0 }}>Zomato Accountant vs Calculated</h2>
               </div>
-
-              <div className="table" style={{ overflowX: "auto", borderTop: "1px solid var(--line)" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
                   <thead>
-                    <tr style={{ background: "#fafcf9" }}>
-                      <th style={{ padding: "12px 18px", textAlign: "left" }}>Week</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Sales</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Sales (POS)</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Comm.</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Comm.</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Payout</th>
-                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Payout</th>
-                      <th style={{ padding: "12px 18px", textAlign: "center" }}>Status</th>
+                    <tr style={{ background: "#f7fbf8", borderBottom: "2px solid var(--line)" }}>
+                      <th style={{ padding: "12px 16px", textAlign: "left" }}>Week</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Accountant Sales</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Calculated Sales</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Accountant Comm.</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Calculated Comm.</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Accountant Payout</th>
+                      <th style={{ padding: "12px 16px", textAlign: "right" }}>Calculated Payout</th>
+                      <th style={{ padding: "12px 16px", textAlign: "center" }}>Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {swiggyAudit.weeks.map((w, idx) => {
-                      const hasErr = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
+                    {zipReport.zomato.weeks.map((w, idx) => {
+                      const bad = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
                       return (
-                        <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
-                          <td style={{ padding: "14px 18px", fontWeight: "600" }}>{w.label}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.sales)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.sales !== 0 ? "var(--red)" : "inherit" }}>
-                            {show(w.calculated.sales)} {w.pos.sales > 0 && <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>(POS: {show(w.pos.sales)})</span>}
-                          </td>
-                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.commission)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.commission !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.commission)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.payout)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.payout !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.payout)}</td>
-                          <td style={{ padding: "14px 18px", textAlign: "center" }}>
-                            <span className={`pill ${hasErr ? "critical" : ""}`} style={{ background: hasErr ? "#feeceb" : "#edf8f0", color: hasErr ? "#a43024" : "#1a6f3b", padding: "4px 8px", borderRadius: 4, fontSize: "11px", fontWeight: "600" }}>
-                              {hasErr ? "Discrepancy" : "Match"}
+                        <tr key={idx} style={{ borderBottom: "1px solid var(--line)", background: bad ? "#fff8f8" : "transparent" }}>
+                          <td style={{ padding: "14px 16px", fontWeight: 700 }}>{w.label}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.accountant.sales)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right", color: w.discrepancy.sales !== 0 ? "#c0392b" : "inherit" }}>{show(w.calculated.sales)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.accountant.commission)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right", color: w.discrepancy.commission !== 0 ? "#c0392b" : "inherit" }}>{show(w.calculated.commission)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(w.accountant.payout)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "right", color: w.discrepancy.payout !== 0 ? "#c0392b" : "inherit" }}>{show(w.calculated.payout)}</td>
+                          <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                            <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: bad ? "#feeceb" : "#edf8f0", color: bad ? "#a43024" : "#1a6f3b" }}>
+                              {bad ? "Discrepancy" : "Match"}
                             </span>
                           </td>
                         </tr>
@@ -2139,32 +2565,245 @@ function SalesReconciliationView() {
             </section>
           )}
         </div>
-      );
-    }
+      )}
 
-    return (
-      <section className="landing">
-        <p className="eyebrow">AUTOMATED RECONCILIATION VERIFIER</p>
-        <h2>Audit Deliverables Zip File</h2>
-        <p className="lead">Upload the zipped deliverables directory. The tool will recursively unzip, sort the aggregator invoices, POS sales reports, and accountant summaries, then check for mismatch errors.</p>
-        
-        <div style={{ marginTop: 32 }}>
-          <label className="upload" style={{ minHeight: 240, border: "1px dashed var(--line)" }}>
-            <input 
-              type="file" 
-              accept=".zip" 
-              onChange={e => e.target.files[0] && handleFileUpload(e.target.files[0])} 
-            />
-            <span style={{ background: "var(--lime)" }}>↑</span>
-            <strong>Upload Deliverables Zip</strong>
-            <small>Drop your zip file containing POS, zomato, swiggy, and summary files</small>
-            <em>Select Zip Archive</em>
-          </label>
+      {/* Input Form (When no report is active) */}
+      {!loading && !report && !posReport && !zipReport && (
+        <div style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", padding: 32 }}>
+          <div style={{ marginBottom: 28 }}>
+            <p className="eyebrow" style={{ color: "var(--forest)", fontWeight: 700, letterSpacing: "0.1em" }}>
+              {platform === "pos" ? "POS SALES CHANNEL EXTRACTOR" : platform === "zip" ? "DELIVERABLES RECONCILIATION ARCHIVE" : `${platform.toUpperCase()} AUTOMATED RECONCILIATION`}
+            </p>
+            <h2 style={{ fontSize: "1.6rem", margin: "4px 0 8px" }}>
+              {platform === "zomato" && "Zomato Payout & Settlement Audit"}
+              {platform === "swiggy" && "Swiggy Order Level Reconciliation"}
+              {platform === "dineout" && "Swiggy Dineout Settlement Audit"}
+              {platform === "zpay" && "Zomato Pay & Ads Reconciliation"}
+              {platform === "paytm" && "Paytm Settlement & MDR Audit"}
+              {platform === "pos" && "Petpooja / Posist Channel Breakdown"}
+              {platform === "zip" && "Auto-Audit Entire Deliverables Folder"}
+            </h2>
+            <p style={{ color: "var(--muted)", fontSize: "0.9rem", lineHeight: 1.6, margin: 0 }}>
+              Upload your raw transaction files and bank statement. All formulas and figures are computed instantly on-screen so you can review and compare without needing to download.
+            </p>
+          </div>
+
+          {/* Form Grid */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+            {/* Row 1: Client Name, Month, Mode */}
+            {platform !== "pos" && platform !== "zip" && (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>CLIENT / RESTAURANT NAME</label>
+                  <input
+                    type="text"
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    placeholder="e.g. Kailash Parbat"
+                    style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", fontSize: "0.9rem" }}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>MONTH</label>
+                  <select
+                    value={month}
+                    onChange={(e) => setMonth(e.target.value)}
+                    style={{ width: "100%", padding: "10px 14px", borderRadius: 8, border: "1px solid var(--line)", fontSize: "0.9rem", background: "#fff" }}
+                  >
+                    {months.map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                  </select>
+                </div>
+                {platform === "zomato" && (
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>RECONCILIATION MODE</label>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        type="button"
+                        onClick={() => setZomatoMode("weekly")}
+                        style={{
+                          flex: 1, padding: "10px", borderRadius: 8, fontSize: "0.82rem", fontWeight: 700, cursor: "pointer",
+                          background: zomatoMode === "weekly" ? "var(--forest)" : "#f5f7f5",
+                          color: zomatoMode === "weekly" ? "#fff" : "var(--text)",
+                          border: "1px solid var(--line)",
+                        }}
+                      >
+                        WEEKLY
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setZomatoMode("consolidated")}
+                        style={{
+                          flex: 1, padding: "10px", borderRadius: 8, fontSize: "0.82rem", fontWeight: 700, cursor: "pointer",
+                          background: zomatoMode === "consolidated" ? "var(--forest)" : "#f5f7f5",
+                          color: zomatoMode === "consolidated" ? "#fff" : "var(--text)",
+                          border: "1px solid var(--line)",
+                        }}
+                      >
+                        CONSOLIDATED
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Row 2: Week Ranges */}
+            {platform !== "zip" && (
+              <div style={{ background: "#fbfcfb", border: "1px solid var(--line)", borderRadius: 10, padding: 18 }}>
+                <div style={{ fontSize: "0.8rem", fontWeight: 700, color: "var(--forest)", marginBottom: 12 }}>
+                  📅 WEEK DATE RANGES (CUSTOMIZE IF NEEDED)
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.74rem", color: "var(--muted)", marginBottom: 4 }}>First Week Start (Day)</label>
+                    <input type="number" min="1" max="31" value={fStart} onChange={(e) => setFStart(Number(e.target.value))} style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.74rem", color: "var(--muted)", marginBottom: 4 }}>First Week End (Day)</label>
+                    <input type="number" min="1" max="31" value={fEnd} onChange={(e) => setFEnd(Number(e.target.value))} style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.74rem", color: "var(--muted)", marginBottom: 4 }}>Last Week Start (Day)</label>
+                    <input type="number" min="1" max="31" value={lStart} onChange={(e) => setLStart(Number(e.target.value))} style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  </div>
+                  <div>
+                    <label style={{ display: "block", fontSize: "0.74rem", color: "var(--muted)", marginBottom: 4 }}>Last Week End (Day)</label>
+                    <input type="number" min="1" max="31" value={lEnd} onChange={(e) => setLEnd(Number(e.target.value))} style={{ width: "100%", padding: "8px 12px", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Row 3: Upload Dropzones */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 18 }}>
+              {/* Primary file input */}
+              {platform === "pos" ? (
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>POS SALES REPORT (.xlsx / .xls / .csv)</label>
+                  <label className="upload" style={{ minHeight: 160, border: "2px dashed var(--line)", background: posFile ? "#edf8f0" : undefined }}>
+                    <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => setPosFile(e.target.files[0])} />
+                    <span style={{ fontSize: "1.3rem" }}>📊</span>
+                    <strong>{posFile ? posFile.name : "Attach POS Report"}</strong>
+                    <small>Petpooja or Posist payment wise export</small>
+                  </label>
+                </div>
+              ) : platform === "zip" ? (
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>DELIVERABLES ARCHIVE (.zip)</label>
+                  <label className="upload" style={{ minHeight: 160, border: "2px dashed var(--line)", background: zipFile ? "#edf8f0" : undefined }}>
+                    <input type="file" accept=".zip" onChange={(e) => setZipFile(e.target.files[0])} />
+                    <span style={{ fontSize: "1.3rem" }}>📦</span>
+                    <strong>{zipFile ? zipFile.name : "Attach Deliverables Zip"}</strong>
+                    <small>Auto-extracts POS, Swiggy, Zomato & summaries</small>
+                  </label>
+                </div>
+              ) : (
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>
+                    {platform.toUpperCase()} WEEKLY INVOICES (.xlsx / .xls / .csv)
+                  </label>
+                  <label className="upload" style={{ minHeight: 160, border: "2px dashed var(--line)", background: invoiceFiles.length > 0 ? "#edf8f0" : undefined }}>
+                    <input
+                      type="file"
+                      multiple
+                      accept=".xlsx,.xls,.csv"
+                      onChange={(e) => {
+                        if (e.target.files) setInvoiceFiles(Array.from(e.target.files));
+                      }}
+                    />
+                    <span style={{ fontSize: "1.3rem" }}>📄</span>
+                    <strong>{invoiceFiles.length > 0 ? `${invoiceFiles.length} Invoices Attached` : `Drop ${platform} Invoices`}</strong>
+                    <small>Select all weekly settlement/invoice files</small>
+                  </label>
+                  {invoiceFiles.length > 0 && (
+                    <div style={{ marginTop: 8, display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {invoiceFiles.map((f, i) => (
+                        <span key={i} style={{ background: "#f0f2f0", padding: "3px 8px", borderRadius: 4, fontSize: "0.74rem", color: "var(--text)" }}>
+                          ✓ {f.name}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Optional Bank Statement input */}
+              {platform !== "pos" && platform !== "zip" && (
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>
+                    BANK STATEMENT <span style={{ color: "var(--forest)" }}>(OPTIONAL FOR VERIFICATION)</span>
+                  </label>
+                  <label className="upload" style={{ minHeight: 160, border: "2px dashed var(--line)", background: bankFile ? "#edf8f0" : undefined }}>
+                    <input type="file" accept=".xlsx,.xls,.csv" onChange={(e) => setBankFile(e.target.files[0])} />
+                    <span style={{ fontSize: "1.3rem" }}>🏦</span>
+                    <strong>{bankFile ? bankFile.name : "Attach Bank Statement"}</strong>
+                    <small>Verifies actual deposit amounts vs expected payout</small>
+                  </label>
+                  {bankFile && (
+                    <button
+                      type="button"
+                      onClick={() => setBankFile(null)}
+                      style={{ marginTop: 6, background: "none", border: 0, color: "#c0392b", fontSize: "0.75rem", cursor: "pointer" }}
+                    >
+                      ✕ Remove bank file
+                    </button>
+                  )}
+                </div>
+              )}
+
+              {/* Zomato Pay Ads File */}
+              {platform === "zpay" && (
+                <div>
+                  <label style={{ display: "block", fontSize: "0.78rem", fontWeight: 700, color: "var(--muted)", marginBottom: 6 }}>
+                    ZOMATO PAY ADS REPORT <span style={{ color: "var(--forest)" }}>(OPTIONAL)</span>
+                  </label>
+                  <label className="upload" style={{ minHeight: 160, border: "2px dashed var(--line)", background: adsFiles.length > 0 ? "#edf8f0" : undefined }}>
+                    <input type="file" multiple accept=".xlsx,.xls,.csv" onChange={(e) => e.target.files && setAdsFiles(Array.from(e.target.files))} />
+                    <span style={{ fontSize: "1.3rem" }}>📢</span>
+                    <strong>{adsFiles.length > 0 ? `${adsFiles.length} Ads Files Attached` : "Attach Zpay Ads Export"}</strong>
+                    <small>Deducts marketing & ad campaign spend</small>
+                  </label>
+                </div>
+              )}
+            </div>
+
+            {error && (
+              <p className="error" style={{ color: "var(--red)", marginTop: 8, padding: "10px 14px", background: "#feeceb", borderRadius: 8 }}>
+                {error}
+              </p>
+            )}
+
+            {/* Submit Button */}
+            <div style={{ marginTop: 8 }}>
+              <button
+                type="button"
+                onClick={handleExecute}
+                style={{
+                  width: "100%",
+                  padding: "16px 24px",
+                  borderRadius: 10,
+                  border: 0,
+                  background: "var(--forest)",
+                  color: "#fff",
+                  fontWeight: 700,
+                  fontSize: "1rem",
+                  letterSpacing: "0.05em",
+                  cursor: "pointer",
+                  boxShadow: "0 4px 14px rgba(20,63,53,0.25)",
+                  transition: "0.2s",
+                }}
+              >
+                EXECUTE {platform.toUpperCase()} RECONCILIATION
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+    </div>
+  );
+}
 
-        {error && <p className="error" style={{ color: "var(--red)", marginTop: 16 }}>{error}</p>}
-      </section>
-    );
-  }
 
 
