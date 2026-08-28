@@ -886,6 +886,48 @@ function AccountPivot({ current }) {
     setExpandedVendors(new Set());
   };
 
+  const exportCSV = () => {
+    if (!pivotData.tree.length) return;
+
+    const headers = ["Account Head", "Vendor", "Item Description", "Quantity", "Avg Rate", "Total Amount"];
+    const rows = [];
+
+    pivotData.tree.forEach(acc => {
+      acc.vendors.forEach(v => {
+        v.items.forEach(it => {
+          rows.push([
+            acc.name,
+            v.name,
+            it.name,
+            it.qty || 0,
+            it.rate ? Number(it.rate.toFixed(2)) : 0,
+            it.total || 0
+          ]);
+        });
+      });
+    });
+
+    const csvContent = [
+      headers.map(h => `"${h.replace(/"/g, '""')}"`).join(","),
+      ...rows.map(row => row.map(val => {
+        const strVal = String(val ?? "");
+        return `"${strVal.replace(/"/g, '""')}"`;
+      }).join(","))
+    ].join("\n");
+
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const clientPrefix = current?.name ? current.name.replace(/\.[^/.]+$/, "") : "audit";
+    const fileName = `${clientPrefix}_account_head_pivot.csv`;
+    link.setAttribute("download", fileName);
+    link.style.visibility = "hidden";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const isSearching = query.trim().length > 0;
   const isAccOpen = (name) => isSearching || expandedAccs.has(name);
   const isVendorOpen = (key) => isSearching || expandedVendors.has(key);
@@ -927,6 +969,7 @@ function AccountPivot({ current }) {
           {query && <button className="pivot-clear-btn" onClick={() => setQuery("")}>✕</button>}
         </div>
         <div className="pivot-actions">
+          <button className="pivot-btn" onClick={exportCSV}>Export CSV</button>
           <button className="pivot-btn" onClick={expandAll}>Expand all</button>
           <button className="pivot-btn" onClick={collapseAll}>Collapse all</button>
         </div>
