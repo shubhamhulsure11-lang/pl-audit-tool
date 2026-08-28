@@ -74,8 +74,18 @@ export const parseDayFromDate = (dateVal) => {
     return dateVal.getDate();
   }
   const s = String(dateVal).trim();
-  // Regex matches DD-MM-YYYY, YYYY-MM-DD, "01 Oct", "1st Oct"
-  const m = s.match(/(\d{1,2})(?:st|nd|rd|th)?[\s/-]+([A-Za-z]{3,}|\d{1,2})/i);
+
+  // ISO format first: YYYY-MM-DD or YYYY-MM-DD HH:MM:SS (e.g. Zomato/Swiggy exports).
+  // Must be checked before the generic regex below, otherwise the year gets
+  // misread as the day (e.g. "2026-07-01" -> "26" from "...26-07-01").
+  const iso = s.match(/^(\d{4})[\s/-](\d{1,2})[\s/-](\d{1,2})/);
+  if (iso) {
+    const d = parseInt(iso[3], 10);
+    if (d >= 1 && d <= 31) return d;
+  }
+
+  // Regex matches DD-MM-YYYY, "01 Oct", "1st Oct"
+  const m = s.match(/^(\d{1,2})(?:st|nd|rd|th)?[\s/-]+([A-Za-z]{3,}|\d{1,2})/i);
   if (m) {
     const d = parseInt(m[1], 10);
     if (d >= 1 && d <= 31) return d;
@@ -89,6 +99,37 @@ export const parseDayFromDate = (dateVal) => {
 };
 
 // ─── File Readers & Sheet Extractors ──────────────────────────────────────────
+
+// Some platform exports (seen on Zomato "Order Level" reports) ship with a
+// stale <dimension> tag in the sheet XML — e.g. it claims the sheet starts at
+// row 9 when real content (including the header row) starts at row 1. Excel
+// and openpyxl silently recompute the true range from the actual cells, but
+// SheetJS trusts the declared tag and drops everything above it. That makes
+// every downstream header lookup fail silently and return 0. Recompute the
+// real range from the cell keys actually present so nothing gets dropped.
+function fixStaleSheetRange(sheet) {
+  if (!sheet) return sheet;
+  let minRow = Infinity, minCol = Infinity, maxRow = -Infinity, maxCol = -Infinity;
+  for (const key of Object.keys(sheet)) {
+    if (key[0] === "!") continue;
+    const addr = XLSX.utils.decode_cell(key);
+    if (addr.r < minRow) minRow = addr.r;
+    if (addr.c < minCol) minCol = addr.c;
+    if (addr.r > maxRow) maxRow = addr.r;
+    if (addr.c > maxCol) maxCol = addr.c;
+  }
+  if (minRow === Infinity) return sheet; // empty sheet, nothing to fix
+
+  const declared = sheet["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]) : null;
+  if (!declared || declared.s.r > minRow || declared.s.c > minCol) {
+    sheet["!ref"] = XLSX.utils.encode_range({
+      s: { r: minRow, c: minCol },
+      e: { r: Math.max(maxRow, declared ? declared.e.r : maxRow), c: Math.max(maxCol, declared ? declared.e.c : maxCol) },
+    });
+  }
+  return sheet;
+}
+
 export async function readWorkbookFromFile(file) {
   let buffer;
   if (file instanceof ArrayBuffer) {
@@ -100,7 +141,9 @@ export async function readWorkbookFromFile(file) {
   } else {
     throw new Error("Invalid file object");
   }
-  return XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true, raw: false });
+  const wb = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true, raw: false });
+  (wb.SheetNames || []).forEach((name) => fixStaleSheetRange(wb.Sheets[name]));
+  return wb;
 }
 
 export function findSheetByPattern(wb, patterns) {
@@ -141,7 +184,18 @@ export function getRowVal(row, candidates) {
   const keys = Object.keys(row);
   for (const c of candidates) {
     const cLower = c.toLowerCase();
-    const matchedKey = keys.find((k) => k.toLowerCase().includes(cLower));
+    // Prefer an exact (trimmed, case-insensitive) header match first, then a
+    // substring match that is NOT a rate/percentage column (e.g. "Base
+    // service fee %" must not satisfy the search for "Base service fee" —
+    // that's a rate, not the fee amount). Only headers that literally END in
+    // "%" are treated as rate columns; a "%" appearing inside a formula note
+    // like "Base service fee\n[(12)% * (B)]" doesn't count.
+    const exactKey = keys.find((k) => k.toLowerCase().trim() === cLower);
+    const substringKeyNoPct = keys.find(
+      (k) => k.toLowerCase().includes(cLower) && !k.trim().endsWith("%")
+    );
+    const anySubstringKey = keys.find((k) => k.toLowerCase().includes(cLower));
+    const matchedKey = exactKey || substringKeyNoPct || anySubstringKey;
     if (matchedKey && row[matchedKey] !== undefined && row[matchedKey] !== "") {
       return cleanNum(row[matchedKey]);
     }
