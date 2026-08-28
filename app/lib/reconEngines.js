@@ -418,11 +418,16 @@ export async function runZomatoRecon({
         const targetWeek = findWeekForDay(orderDay, weekRanges);
         const wData = weekDataMap[targetWeek.weekNum];
 
-        wData.orders += 1;
-
         const status = getRowString(r, ["order status"]).toUpperCase();
         const isDelivered = status === "DELIVERED";
         const isCancelledGroup = CANCELLED_STATUSES.includes(status);
+
+        // Only count recognized (delivered/cancelled) rows — matches the
+        // reference tool's order count, which excludes malformed/unrecognized
+        // rows (e.g. a stray #REF! row) that aren't real orders.
+        if (isDelivered || isCancelledGroup) {
+          wData.orders += 1;
+        }
 
         if (isDelivered) {
           wData.itemTotalDelivered += getRowVal(r, [
@@ -500,6 +505,17 @@ export async function runZomatoRecon({
 
     const netPayout = Math.max(0, netSalesExclGst + gstCollected - commission - otherDeductions);
 
+    // Summary/Profit-statement-sheet derived metrics (match the reference
+    // tool's own definitions, verified against real settlement data):
+    //  - Commissionable Amount = item sales minus discount (pre-packaging/GST)
+    //  - "Total Income" (Profit statement) = item sales + packaging + GST
+    //    collected − discount − GST paid by Zomato
+    //  - "Net Sales (Numerize)" = that Total Income + cancellation compensation
+    const commissionableAmount = d.itemTotalDelivered - discounts;
+    const totalIncomeProfitStmt = d.itemTotalDelivered + d.packagingDelivered + gstCollected - discounts - d.gstPaidByZomatoAll;
+    const netSalesNumerize = totalIncomeProfitStmt + d.compensationCancelled;
+    const otherChargesAndTaxAdj = otherChargesGrossed + taxAdjustments; // Summary sheet's combined line (excludes marketing/hyperpure, which are separate rows)
+
     // Bank match
     const bankCheck = matchBankPayout(netPayout, bankTxs);
 
@@ -531,6 +547,10 @@ export async function runZomatoRecon({
       marketingAds: d.marketingAds,
       hyperpure: d.hyperpure,
       otherDeductions,
+      commissionableAmount,
+      totalIncomeProfitStmt,
+      netSalesNumerize,
+      otherChargesAndTaxAdj,
       expectedPayout: netPayout,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
       bankDiff: bankCheck.matched ? bankCheck.diff : -netPayout,
@@ -566,6 +586,10 @@ export async function runZomatoRecon({
     marketingAds: sum("marketingAds"),
     hyperpure: sum("hyperpure"),
     otherDeductions: sum("otherDeductions"),
+    commissionableAmount: sum("commissionableAmount"),
+    totalIncomeProfitStmt: sum("totalIncomeProfitStmt"),
+    netSalesNumerize: sum("netSalesNumerize"),
+    otherChargesAndTaxAdj: sum("otherChargesAndTaxAdj"),
     expectedPayout: sum("expectedPayout"),
     bankActual: sum("bankActual"),
     bankDiff: sum("bankDiff"),
@@ -1318,10 +1342,12 @@ export function exportReconWorkbook(report) {
 // ═════════════════════════════════════════════════════════════════════════════
 // SHARED LINE-ITEM ROW DEFINITIONS — used by both the on-screen breakdown
 // tables (page.js) and the downloadable multi-sheet workbook below, so the
-// two views can never drift out of sync. Zomato gets the fully detailed,
-// line-item-accurate rows (validated against real settlement data). Other
-// platforms currently fall back to the common fields the recon engines
-// already compute.
+// two views can never drift out of sync. For Zomato these are a row-by-row
+// match of the original recon tool's own Summary/Cashflow/Profit
+// statement/Discrepancies sheets (verified by recalculating a real output
+// file from the original tool and comparing every line). Other platforms
+// currently fall back to the common fields the recon engines already
+// compute, since only Zomato has been validated against real report data.
 // ═════════════════════════════════════════════════════════════════════════════
 const r2 = (v) => Math.round((v || 0) * 100) / 100;
 
@@ -1329,9 +1355,44 @@ export function isZomatoDetailed(report) {
   return report.platform === "Zomato" && report.weeks.length > 0 && "itemSales" in report.weeks[0];
 }
 
+// A handful of rows in the original tool (refunds on disputed orders,
+// manual dispute counts, week-boundary carry-over adjustments, EMI/loan
+// deductions, etc.) aren't derivable from a settlement report alone — the
+// original tool also just defaults them to 0 / leaves them for manual entry.
+// They're kept here, at 0, purely so the structure matches line-for-line;
+// each is commented with what it represents.
+const zero = () => 0;
+
 // Each row: [label, getter(weekOrTotal), kind] — kind is a display hint
-// ("add" | "less" | "subtotal" | "total" | "variance" | "plain") used by the
-// on-screen table for styling; the workbook export ignores it.
+// ("add" | "less" | "subtotal" | "total" | "variance" | "percent" | "plain")
+// used by the on-screen table for styling; the workbook export ignores it.
+export function getSummaryRowDefs(report) {
+  if (isZomatoDetailed(report)) {
+    return [
+      ["No. of Orders", (x) => x.orders, "plain"],
+      ["Total Income (Number you'd see on Zomato dashboard)", (x) => x.netSales, "plain"],
+      ["Avg. Order Value", (x) => (x.orders ? x.netSales / x.orders : 0), "plain"],
+      ["No. of Disputed Orders (manual entry)", zero, "plain"],
+      ["Refund Amount for Disputed Orders", zero, "plain"],
+      ["Discounts", (x) => x.discounts, "less"],
+      ["Commissionable Amount", (x) => x.commissionableAmount, "plain"],
+      ["Commission", (x) => x.commission, "less"],
+      ["Marketing & Ads", (x) => x.marketingAds, "less"],
+      ["Other Charges & Tax Adjustments", (x) => x.otherChargesAndTaxAdj, "less"],
+      ["Zomato Hyperpure Adjustments", (x) => x.hyperpure, "less"],
+      ["Money Received (Expected)", (x) => x.expectedPayout, "total"],
+    ];
+  }
+  return [
+    ["No. of Orders", (x) => x.orders, "plain"],
+    ["Gross Sales / Total Income", (x) => x.grossSales ?? x.totalIncome ?? x.salesInclGst ?? 0, "plain"],
+    ["Discounts", (x) => x.discounts || 0, "less"],
+    ["Commission", (x) => x.commission ?? x.commissionInclGst ?? 0, "less"],
+    ["Other Deductions/Taxes", (x) => x.otherDeductions ?? x.taxesAndDeductions ?? 0, "less"],
+    ["Money Received (Expected)", (x) => x.expectedPayout ?? x.expectedReceipt ?? 0, "total"],
+  ];
+}
+
 export function getCashflowRowDefs(report) {
   if (isZomatoDetailed(report)) {
     return [
@@ -1342,18 +1403,33 @@ export function getCashflowRowDefs(report) {
       ["Add:- GST", (x) => x.gstCollected, "add"],
       ["Net Sales", (x) => x.netSales, "subtotal"],
       ["Less:- Commission (Platform Fee, incl. GST)", (x) => -x.commission, "less"],
-      ["Less:- Convenience Fee (incl. GST)", (x) => -x.convenienceFee, "less"],
-      ["Less:- Long Distance Fee (incl. GST)", (x) => -x.longDistanceFee, "less"],
-      ["Add:- Discount on Service Fee (incl. GST)", (x) => x.discountOnServiceFee, "add"],
-      ["Less:- Marketing/Ads", (x) => -x.marketingAds, "less"],
-      ["Less:- Hyperpure", (x) => -x.hyperpure, "less"],
-      ["Less:- GST collected & paid by Zomato", (x) => -x.gstPaidByZomato, "less"],
+      ["Less:- Other Charges", (x) => -(x.convenienceFee + x.longDistanceFee - x.discountOnServiceFee), "less"],
+      ["   Convenience Fee", (x) => -x.convenienceFee, "less"],
+      ["   Discount on Service Fee", (x) => x.discountOnServiceFee, "add"],
+      ["   Long Distance Fee", (x) => -x.longDistanceFee, "less"],
+      ["Merchant Cancellation Charges", zero, "plain"],
+      ["Less:- Refunds", zero, "plain"],
+      ["   Paid by Restaurant", zero, "plain"],
+      ["Received by Restaurant", zero, "plain"],
+      ["Less:- Marketing Charges", (x) => -x.marketingAds, "less"],
+      ["   High Priority", zero, "plain"],
+      ["   Call Center Service Fees", zero, "plain"],
+      ["   PocketHero Fee", zero, "plain"],
       ["Profit from Zomato", (x) => x.profitFromZomato, "subtotal"],
-      ["Less:- TDS 194O", (x) => -x.tds, "less"],
-      ["Less:- TCS", (x) => -x.tcs, "less"],
-      ["Expected Payout / Receipts", (x) => x.expectedPayout, "total"],
-      ["Bank Actual", (x) => x.bankActual, "plain"],
-      ["Variance", (x) => x.bankDiff, "variance"],
+      ["Less:- Tax Adjustments", (x) => -x.tdsAndTcsOnly, "less"],
+      ["   TDS deduction for aggregators", (x) => -x.tds, "less"],
+      ["   TCS", (x) => -x.tcs, "less"],
+      ["Less:- GST collected and paid by Zomato", (x) => -x.gstPaidByZomato, "less"],
+      ["Expected Receipts", (x) => x.expectedPayout, "total"],
+      ["   Service Fee Reversal", zero, "plain"],
+      ["   Interim payments", zero, "plain"],
+      ["   Opening Week Adjustments", zero, "plain"],
+      ["   Following Week Adjustments", zero, "plain"],
+      ["   Closing Week Adjustments", zero, "plain"],
+      ["   Zomato Hyperpure Payment Adjustments", (x) => -x.hyperpure, "less"],
+      ["   EMI Loan deductions", zero, "plain"],
+      ["Actual receipts", (x) => x.bankActual, "plain"],
+      ["Difference (Expected − Actual)", (x) => x.expectedPayout - x.bankActual, "variance"],
     ];
   }
   return [
@@ -1371,14 +1447,16 @@ export function getCashflowRowDefs(report) {
 export function getProfitRowDefs(report) {
   if (isZomatoDetailed(report)) {
     return [
-      ["A. Net Sales", (x) => x.netSales, "plain"],
+      ["A. Net Sales", (x) => "", "section"],
+      ["   Total Income", (x) => x.totalIncomeProfitStmt, "plain"],
+      ["   Add:- Adjust: Cancelled orders (by Zomato)", (x) => x.compensation, "add"],
+      ["   Net Sales (Number you'd see on Numerize app)", (x) => x.netSalesNumerize, "subtotal"],
       ["B. Less:- Commission", (x) => -x.commission, "less"],
-      ["C. Less:- Other Charges (Convenience/Long Distance − Discount on Service Fee)", (x) => -x.otherChargesGrossed, "less"],
-      ["D. Less:- Marketing/Ads & Hyperpure", (x) => -(x.marketingAds + x.hyperpure), "less"],
-      ["D2. Less:- GST collected & paid by Zomato", (x) => -x.gstPaidByZomato, "less"],
-      ["Profit from Zomato (A − B − C − D − D2)", (x) => x.profitFromZomato, "subtotal"],
-      ["E. Less:- Tax Adjustments (TDS + TCS)", (x) => -x.tdsAndTcsOnly, "less"],
-      ["Expected Receipts (Profit − E)", (x) => x.expectedPayout, "total"],
+      ["C. Less:- Marketing & Ads", (x) => -x.marketingAds, "less"],
+      ["D. Less:- Refund on Disputed Orders (manual entry)", zero, "plain"],
+      ["E. Other Charges", (x) => -x.otherChargesGrossed, "less"],
+      ["F. Profit (Net Sales − B − C − D − E)", (x) => x.profitFromZomato, "total"],
+      ["Percentage of Net Sales", (x) => (x.netSalesNumerize ? x.profitFromZomato / x.netSalesNumerize : 0), "percent"],
     ];
   }
   return [
@@ -1389,12 +1467,40 @@ export function getProfitRowDefs(report) {
   ];
 }
 
+// Discrepancies mirrors the original tool's A. POS / B. Order / C. Payment
+// three-section layout. Note the sign convention here matches the original
+// tool exactly: Difference = Expected − Actual (positive = shortfall),
+// which is the opposite sign from the "Variance" used in the Cashflow row.
+export function getDiscrepancyRowDefs(report) {
+  if (isZomatoDetailed(report)) {
+    return [
+      ["A. POS Discrepancies", (x) => "", "section"],
+      ["   Sales as per Zomato", (x) => x.netSales, "plain"],
+      ["   Sale as per POS (not uploaded)", zero, "plain"],
+      ["   Difference (POS − Zomato)", (x) => -x.netSales, "less"],
+      ["B. Order Discrepancies", (x) => "", "section"],
+      ["   No. of delivered orders unpaid (manual entry)", zero, "plain"],
+      ["   Value of such orders (manual entry)", zero, "plain"],
+      ["C. Payment Discrepancies", (x) => "", "section"],
+      ["   Expected receipts in the bank account", (x) => x.expectedPayout, "plain"],
+      ["   Investment in Hyperpure", (x) => -x.hyperpure, "less"],
+      ["   Actual receipts in the bank", (x) => x.bankActual, "plain"],
+      ["   Difference (Expected − Actual)", (x) => x.expectedPayout - x.hyperpure - x.bankActual, "total"],
+    ];
+  }
+  return [
+    ["Expected Payout / Receipts", (x) => x.expectedPayout ?? x.expectedReceipt ?? 0, "plain"],
+    ["Bank Actual", (x) => x.bankActual || 0, "plain"],
+    ["Difference (Expected − Actual)", (x) => (x.expectedPayout ?? x.expectedReceipt ?? 0) - (x.bankActual || 0), "total"],
+  ];
+}
+
 function buildLineRowsAoa(report, rowDefs) {
   const header = ["Details", ...report.weeks.map((w) => w.label), "Total"];
   const body = rowDefs.map(([label, getter]) => [
     label,
-    ...report.weeks.map((w) => r2(getter(w))),
-    r2(getter(report.total)),
+    ...report.weeks.map((w) => (typeof getter(w) === "number" ? r2(getter(w)) : getter(w))),
+    typeof getter(report.total) === "number" ? r2(getter(report.total)) : getter(report.total),
   ]);
   return [header, ...body];
 }
@@ -1408,19 +1514,8 @@ export function exportFullReconWorkbook(report) {
     [`${report.clientName} — ${report.platform} Summary (${report.month})`],
     ["Generated:", generated],
     [],
-    ["Details", ...report.weeks.map((w) => w.label), "Total"],
-    ["No. of Orders", ...report.weeks.map((w) => w.orders), report.total.orders],
-    [
-      "Gross Sales (₹)",
-      ...report.weeks.map((w) => r2(w.grossSales ?? w.totalIncome ?? w.salesInclGst)),
-      r2(report.total.grossSales ?? report.total.totalIncome ?? report.total.salesInclGst),
-    ],
-    [
-      "Expected Payout (₹)",
-      ...report.weeks.map((w) => r2(w.expectedPayout ?? w.expectedReceipt)),
-      r2(report.total.expectedPayout ?? report.total.expectedReceipt),
-    ],
-    ["Bank Actual (₹)", ...report.weeks.map((w) => r2(w.bankActual)), r2(report.total.bankActual)],
+    ...buildLineRowsAoa(report, getSummaryRowDefs(report)),
+    [],
     ["Bank Statement Attached?", report.hasBank ? "Yes" : "No"],
     ["Source Files Processed", report.filesCount],
   ];
@@ -1448,26 +1543,10 @@ export function exportFullReconWorkbook(report) {
     [
       report.hasBank
         ? "Compares expected payout against the uploaded bank statement."
-        : "No bank statement was uploaded — every week shows as unmatched. Upload a bank statement to check actual settlement vs expected payout.",
+        : "No bank statement was uploaded — every week shows as unmatched (POS/bank rows default to 0). Upload one to check actual settlement vs expected payout.",
     ],
     [],
-    ["Week / Period", "Expected Payout (₹)", "Bank Actual (₹)", "Variance (₹)", "UTR", "Status"],
-    ...report.weeks.map((w) => [
-      w.label,
-      r2(w.expectedPayout ?? w.expectedReceipt),
-      r2(w.bankActual),
-      r2(w.bankDiff),
-      w.utr || "—",
-      w.bankMatched ? "MATCHED" : "DISCREPANCY",
-    ]),
-    [
-      report.total.label,
-      r2(report.total.expectedPayout ?? report.total.expectedReceipt),
-      r2(report.total.bankActual),
-      r2(report.total.bankDiff),
-      "—",
-      report.total.bankMatched ? "ALL MATCHED" : "FLAGGED",
-    ],
+    ...buildLineRowsAoa(report, getDiscrepancyRowDefs(report)),
   ];
   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(discRows), "Discrepancies");
 

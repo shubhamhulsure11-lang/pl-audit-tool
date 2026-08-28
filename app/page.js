@@ -19,6 +19,8 @@ import {
   exportFullReconWorkbook,
   getCashflowRowDefs,
   getProfitRowDefs,
+  getSummaryRowDefs,
+  getDiscrepancyRowDefs,
 } from "./lib/reconEngines";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
@@ -1776,6 +1778,7 @@ function Card({ label, value, warm }) { return <article className={warm ? "card 
 // on-screen table: weeks as columns, line items as rows, styled by "kind".
 function LineItemBreakdownTable({ title, subtitle, report, rowDefs }) {
   const rowStyle = (kind) => {
+    if (kind === "section") return { fontWeight: 700, background: "#eef3ef" };
     if (kind === "subtotal") return { fontWeight: 700, background: "#f7fbf8", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" };
     if (kind === "total") return { fontWeight: 700, background: "#f0f6f2", borderTop: "2px solid var(--forest)", borderBottom: "2px solid var(--forest)" };
     return { borderBottom: "1px solid var(--line)" };
@@ -1787,7 +1790,11 @@ function LineItemBreakdownTable({ title, subtitle, report, rowDefs }) {
     if (kind === "total") return "var(--forest)";
     return "inherit";
   };
-  const fmtCell = (val, kind) => {
+  const fmtCell = (val, kind, label) => {
+    if (kind === "section") return "";
+    if (typeof val !== "number") return val ?? "";
+    if (kind === "percent") return `${(val * 100).toFixed(1)}%`;
+    if (kind === "plain" && /orders?$/i.test(label.trim())) return String(Math.round(val));
     if (kind === "variance") return val === 0 ? "0" : show(val);
     return show(val);
   };
@@ -1812,18 +1819,24 @@ function LineItemBreakdownTable({ title, subtitle, report, rowDefs }) {
           <tbody>
             {rowDefs.map(([label, getter, kind], idx) => (
               <tr key={idx} style={rowStyle(kind)}>
-                <td style={{ padding: "12px 16px", fontWeight: kind === "subtotal" || kind === "total" ? 700 : 500 }}>{label}</td>
-                {report.weeks.map((w) => {
-                  const val = getter(w);
-                  return (
-                    <td key={w.weekNum} style={{ padding: "12px 16px", textAlign: "right", color: valueColor(kind, val) }}>
-                      {fmtCell(val, kind)}
+                <td style={{ padding: "12px 16px", fontWeight: kind === "subtotal" || kind === "total" || kind === "section" ? 700 : 500, whiteSpace: "pre" }}>{label}</td>
+                {kind === "section" ? (
+                  <td colSpan={report.weeks.length + 1} />
+                ) : (
+                  <>
+                    {report.weeks.map((w) => {
+                      const val = getter(w);
+                      return (
+                        <td key={w.weekNum} style={{ padding: "12px 16px", textAlign: "right", color: valueColor(kind, val) }}>
+                          {fmtCell(val, kind, label)}
+                        </td>
+                      );
+                    })}
+                    <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: valueColor(kind, getter(report.total)) }}>
+                      {fmtCell(getter(report.total), kind, label)}
                     </td>
-                  );
-                })}
-                <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: valueColor(kind, getter(report.total)) }}>
-                  {fmtCell(getter(report.total), kind)}
-                </td>
+                  </>
+                )}
               </tr>
             ))}
           </tbody>
@@ -2063,6 +2076,8 @@ function CopyPriceExceptionsButton({ prices }) {
     </div>
   );
 }
+
+
 
 function SalesReconciliationView() {
   const [platform, setPlatform] = useState("zomato"); // zomato | swiggy | dineout | zpay | paytm | pos | zip
@@ -2376,11 +2391,19 @@ function SalesReconciliationView() {
             )}
           </section>
 
+          {/* Summary — mirrors the original tool's Summary sheet row-for-row */}
+          <LineItemBreakdownTable
+            title={`${report.platform} Summary`}
+            subtitle="SUMMARY"
+            report={report}
+            rowDefs={getSummaryRowDefs(report)}
+          />
+
           {/* Comprehensive On-Screen Table */}
           <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
               <div>
-                <p className="eyebrow">AUDITOR RECONCILIATION SPREADSHEET</p>
+                <p className="eyebrow">QUICK COPY TABLE</p>
                 <h2 style={{ margin: 0, fontSize: "1.3rem" }}>Multi-Week Financial Breakdown</h2>
               </div>
               <div style={{ display: "flex", gap: 10 }}>
@@ -2543,7 +2566,15 @@ function SalesReconciliationView() {
             rowDefs={getProfitRowDefs(report)}
           />
 
-          {/* Discrepancies */}
+          {/* Discrepancies — structured A/B/C breakdown, mirrors original tool */}
+          <LineItemBreakdownTable
+            title={`${report.platform} Discrepancies`}
+            subtitle="POS / ORDER / PAYMENT DISCREPANCIES"
+            report={report}
+            rowDefs={getDiscrepancyRowDefs(report)}
+          />
+
+          {/* Discrepancies — per-week UTR & match status */}
           <DiscrepancyTable report={report} />
         </div>
       )}
