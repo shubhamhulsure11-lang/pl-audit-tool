@@ -1748,37 +1748,24 @@ function Changes({ title, rows, field, threshold }) {
 function CopyDuplicatesButton({ duplicates }) {
   const [copied, setCopied] = useState(false);
 
-  function buildText() {
-    const colW = [12, 20, 22, 26, 16, 14];
-    const pad = (s, w) => String(s ?? "—").padEnd(w).slice(0, w);
-    const lines = [];
-    lines.push("DUPLICATE BILL REPORT");
-    lines.push("=".repeat(90));
-    lines.push("");
-    duplicates.forEach((x, idx) => {
-      lines.push(`${idx + 1}. ${x.kind.toUpperCase()}   (${x.rows.length} matching lines  |  Total Exposure: ${show(x.total)})`);
-      lines.push("-".repeat(90));
-      lines.push(pad("Date", colW[0]) + pad("Bill No.", colW[1]) + pad("Vendor Name", colW[2]) + pad("Item", colW[3]) + pad("Qty", colW[4]) + pad("Amount", colW[5]));
-      lines.push("-".repeat(90));
-      x.rows.forEach(r => {
-        lines.push(
-          pad(r.date || "—", colW[0]) +
-          pad(r.bill || "—", colW[1]) +
-          pad(r.vendor || "—", colW[2]) +
-          pad(r.item || "—", colW[3]) +
-          pad(r.qty != null && r.qty !== 0 ? r.qty : "—", colW[4]) +
-          pad(show(r.total), colW[5])
-        );
-      });
-      lines.push("");
-    });
-    lines.push("=".repeat(90));
-    lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
-    return lines.join("\n");
-  }
-
   function handleCopy() {
-    navigator.clipboard.writeText(buildText()).then(() => {
+    const cleanTsvVal = (val) => String(val ?? "").replace(/\t/g, " ").replace(/\r?\n/g, " ");
+    const rows = [];
+    duplicates.forEach(x => {
+      x.rows.forEach(r => {
+        const branch = cleanTsvVal(r.branch);
+        const date = cleanTsvVal(r.date);
+        const category = "";
+        const type = "";
+        const supplier = cleanTsvVal(r.vendor);
+        const error = cleanTsvVal(x.kind);
+        const review = cleanTsvVal(`Bill No: ${r.bill || "—"} | Item: ${r.item || "—"} | Qty: ${r.qty || "—"} | Amt: ${show(r.total)}`);
+
+        rows.push([branch, date, category, type, supplier, error, review].join("\t"));
+      });
+    });
+
+    navigator.clipboard.writeText(rows.join("\n")).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     });
@@ -1797,7 +1784,7 @@ function CopyDuplicatesButton({ duplicates }) {
           transition: "background 0.25s, color 0.25s",
         }}
       >
-        {copied ? (<><span>✓</span> Copied!</>) : (<><span style={{ fontSize: "1rem" }}>📋</span> Copy for Accountant</>)}
+        {copied ? (<><span>✓</span> Copied!</>) : (<><span style={{ fontSize: "1rem" }}>📋</span> Copy for Spreadsheet</>)}
       </button>
     </div>
   );
@@ -1806,37 +1793,26 @@ function CopyDuplicatesButton({ duplicates }) {
 function CopyChangesButton({ title, rows, field, threshold }) {
   const [copied, setCopied] = useState(false);
 
-  function buildText() {
-    const colW = [30, 20, 20, 16, 12];
-    const pad = (s, w) => String(s ?? "—").padEnd(w).slice(0, w);
-    const lines = [];
-    lines.push(`${title.toUpperCase()} REPORT (${threshold}%+ change or new entry)`);
-    lines.push("=".repeat(98));
-    lines.push(
-      pad(field, colW[0]) +
-      pad("Current month", colW[1]) +
-      pad("Previous month", colW[2]) +
-      pad("Change", colW[3]) +
-      pad("Status", colW[4])
-    );
-    lines.push("-".repeat(98));
-    rows.forEach(x => {
-      const diffStr = (x.diff >= 0 ? "+" : "") + show(x.diff);
-      lines.push(
-        pad(x.label, colW[0]) +
-        pad(show(x.total), colW[1]) +
-        pad(show(x.old), colW[2]) +
-        pad(diffStr, colW[3]) +
-        pad(x.status, colW[4])
-      );
-    });
-    lines.push("=".repeat(98));
-    lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
-    return lines.join("\n");
-  }
-
   function handleCopy() {
-    navigator.clipboard.writeText(buildText()).then(() => {
+    const cleanTsvVal = (val) => String(val ?? "").replace(/\t/g, " ").replace(/\r?\n/g, " ");
+    const tsvRows = [];
+    rows.forEach(x => {
+      const branch = "";
+      const date = "";
+      const category = "";
+      const type = "";
+      const supplier = cleanTsvVal(field === "Vendor" ? x.label : "");
+      const error = cleanTsvVal(title);
+      const diffStr = (x.diff >= 0 ? "+" : "") + show(x.diff);
+      const review = cleanTsvVal(field === "Vendor"
+        ? `Current: ${show(x.total)} | Previous: ${show(x.old)} | Change: ${diffStr} | Status: ${x.status}`
+        : `Item: ${x.label} | Current: ${show(x.total)} | Previous: ${show(x.old)} | Change: ${diffStr} | Status: ${x.status}`
+      );
+
+      tsvRows.push([branch, date, category, type, supplier, error, review].join("\t"));
+    });
+
+    navigator.clipboard.writeText(tsvRows.join("\n")).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     });
@@ -1858,7 +1834,7 @@ function CopyChangesButton({ title, rows, field, threshold }) {
         {copied ? (
           <><span>✓</span> Copied!</>
         ) : (
-          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Accountant</>
+          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Spreadsheet</>
         )}
       </button>
     </div>
@@ -1868,37 +1844,23 @@ function CopyChangesButton({ title, rows, field, threshold }) {
 function CopyPriceExceptionsButton({ prices }) {
   const [copied, setCopied] = useState(false);
 
-  function buildText() {
-    const colW = [26, 26, 16, 16, 12];
-    const pad = (s, w) => String(s ?? "—").padEnd(w).slice(0, w);
-    const lines = [];
-    lines.push("PRICE EXCEPTIONS REPORT (purchased above weighted average)");
-    lines.push("=".repeat(96));
-    lines.push(
-      pad("Item", colW[0]) +
-      pad("Vendor", colW[1]) +
-      pad("Rate paid", colW[2]) +
-      pad("Weighted avg", colW[3]) +
-      pad("Variance", colW[4])
-    );
-    lines.push("-".repeat(96));
-    prices.forEach(x => {
-      const varStr = `+${(x.pct * 100).toFixed(0)}%`;
-      lines.push(
-        pad(x.item, colW[0]) +
-        pad(x.vendor, colW[1]) +
-        pad(show(x.rate), colW[2]) +
-        pad(show(x.avg), colW[3]) +
-        pad(varStr, colW[4])
-      );
-    });
-    lines.push("=".repeat(96));
-    lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
-    return lines.join("\n");
-  }
-
   function handleCopy() {
-    navigator.clipboard.writeText(buildText()).then(() => {
+    const cleanTsvVal = (val) => String(val ?? "").replace(/\t/g, " ").replace(/\r?\n/g, " ");
+    const rows = [];
+    prices.forEach(x => {
+      const branch = cleanTsvVal(x.branch);
+      const date = cleanTsvVal(x.date);
+      const category = "";
+      const type = "";
+      const supplier = cleanTsvVal(x.vendor);
+      const error = "Price exception";
+      const varStr = `+${(x.pct * 100).toFixed(0)}%`;
+      const review = cleanTsvVal(`Item: ${x.item} | Rate paid: ${show(x.rate)} | Weighted avg: ${show(x.avg)} | Variance: ${varStr}`);
+
+      rows.push([branch, date, category, type, supplier, error, review].join("\t"));
+    });
+
+    navigator.clipboard.writeText(rows.join("\n")).then(() => {
       setCopied(true);
       setTimeout(() => setCopied(false), 2500);
     });
@@ -1920,7 +1882,7 @@ function CopyPriceExceptionsButton({ prices }) {
         {copied ? (
           <><span>✓</span> Copied!</>
         ) : (
-          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Accountant</>
+          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Spreadsheet</>
         )}
       </button>
     </div>
