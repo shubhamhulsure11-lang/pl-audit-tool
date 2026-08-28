@@ -16,6 +16,9 @@ import {
   runPaytmRecon,
   runPosCleaner,
   exportReconWorkbook,
+  exportFullReconWorkbook,
+  getCashflowRowDefs,
+  getProfitRowDefs,
 } from "./lib/reconEngines";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
@@ -1768,6 +1771,132 @@ export default function Home() {
 }
 
 function Card({ label, value, warm }) { return <article className={warm ? "card warm" : "card"}><small>{label}</small><strong>{value}</strong></article>; }
+
+// Renders one of the shared row-def sets (Cashflow / Profit statement) as an
+// on-screen table: weeks as columns, line items as rows, styled by "kind".
+function LineItemBreakdownTable({ title, subtitle, report, rowDefs }) {
+  const rowStyle = (kind) => {
+    if (kind === "subtotal") return { fontWeight: 700, background: "#f7fbf8", borderTop: "1px solid var(--line)", borderBottom: "1px solid var(--line)" };
+    if (kind === "total") return { fontWeight: 700, background: "#f0f6f2", borderTop: "2px solid var(--forest)", borderBottom: "2px solid var(--forest)" };
+    return { borderBottom: "1px solid var(--line)" };
+  };
+  const valueColor = (kind, val) => {
+    if (kind === "variance") return val === 0 ? "var(--muted)" : "#c0392b";
+    if (kind === "less") return "#c0392b";
+    if (kind === "add") return "#1a6f3b";
+    if (kind === "total") return "var(--forest)";
+    return "inherit";
+  };
+  const fmtCell = (val, kind) => {
+    if (kind === "variance") return val === 0 ? "0" : show(val);
+    return show(val);
+  };
+
+  return (
+    <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+      <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
+        <p className="eyebrow">{subtitle}</p>
+        <h2 style={{ margin: 0, fontSize: "1.3rem" }}>{title}</h2>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+          <thead>
+            <tr style={{ background: "#f7fbf8", borderBottom: "2px solid var(--line)" }}>
+              <th style={{ padding: "12px 16px", textAlign: "left" }}>Details</th>
+              {report.weeks.map((w) => (
+                <th key={w.weekNum} style={{ padding: "12px 16px", textAlign: "right" }}>{w.label}</th>
+              ))}
+              <th style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700 }}>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rowDefs.map(([label, getter, kind], idx) => (
+              <tr key={idx} style={rowStyle(kind)}>
+                <td style={{ padding: "12px 16px", fontWeight: kind === "subtotal" || kind === "total" ? 700 : 500 }}>{label}</td>
+                {report.weeks.map((w) => {
+                  const val = getter(w);
+                  return (
+                    <td key={w.weekNum} style={{ padding: "12px 16px", textAlign: "right", color: valueColor(kind, val) }}>
+                      {fmtCell(val, kind)}
+                    </td>
+                  );
+                })}
+                <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: valueColor(kind, getter(report.total)) }}>
+                  {fmtCell(getter(report.total), kind)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
+// Discrepancies section: expected payout vs bank actual, per week.
+function DiscrepancyTable({ report }) {
+  return (
+    <section className="panel" style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", overflow: "hidden" }}>
+      <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--line)" }}>
+        <p className="eyebrow">DISCREPANCIES</p>
+        <h2 style={{ margin: 0, fontSize: "1.3rem" }}>Expected Payout vs Bank Actual</h2>
+        {!report.hasBank && (
+          <small style={{ display: "block", marginTop: 6, color: "var(--muted)" }}>
+            No bank statement uploaded — every week shows as unmatched. Upload one to check actual settlement vs expected payout.
+          </small>
+        )}
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.85rem" }}>
+          <thead>
+            <tr style={{ background: "#f7fbf8", borderBottom: "2px solid var(--line)" }}>
+              <th style={{ padding: "12px 16px", textAlign: "left" }}>Week / Period</th>
+              <th style={{ padding: "12px 16px", textAlign: "right" }}>Expected Payout</th>
+              <th style={{ padding: "12px 16px", textAlign: "right" }}>Bank Actual</th>
+              <th style={{ padding: "12px 16px", textAlign: "right" }}>Variance</th>
+              <th style={{ padding: "12px 16px", textAlign: "left" }}>UTR</th>
+              <th style={{ padding: "12px 16px", textAlign: "center" }}>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {report.weeks.map((w) => {
+              const expected = w.expectedPayout ?? w.expectedReceipt;
+              return (
+                <tr key={w.weekNum} style={{ borderBottom: "1px solid var(--line)", background: w.bankMatched ? "transparent" : "#fff8f8" }}>
+                  <td style={{ padding: "12px 16px", fontWeight: 700 }}>{w.label}</td>
+                  <td style={{ padding: "12px 16px", textAlign: "right" }}>{show(expected)}</td>
+                  <td style={{ padding: "12px 16px", textAlign: "right" }}>{show(w.bankActual)}</td>
+                  <td style={{ padding: "12px 16px", textAlign: "right", fontWeight: 700, color: w.bankDiff === 0 ? "var(--muted)" : "#c0392b" }}>
+                    {w.bankDiff === 0 ? "0" : show(w.bankDiff)}
+                  </td>
+                  <td style={{ padding: "12px 16px", fontSize: "12px", color: "var(--muted)" }}>{w.utr || "—"}</td>
+                  <td style={{ padding: "12px 16px", textAlign: "center" }}>
+                    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: w.bankMatched ? "#edf8f0" : "#feeceb", color: w.bankMatched ? "#1a6f3b" : "#a43024" }}>
+                      {w.bankMatched ? "MATCHED" : "DISCREPANCY"}
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+            <tr style={{ background: "#f0f6f2", fontWeight: 700, borderTop: "2px solid var(--forest)" }}>
+              <td style={{ padding: "14px 16px" }}>{report.total.label}</td>
+              <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(report.total.expectedPayout ?? report.total.expectedReceipt)}</td>
+              <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(report.total.bankActual)}</td>
+              <td style={{ padding: "14px 16px", textAlign: "right" }}>{show(report.total.bankDiff)}</td>
+              <td style={{ padding: "14px 16px" }}>—</td>
+              <td style={{ padding: "14px 16px", textAlign: "center" }}>
+                <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: "11px", fontWeight: 700, background: report.total.bankMatched ? "#edf8f0" : "#feeceb", color: report.total.bankMatched ? "#1a6f3b" : "#a43024" }}>
+                  {report.total.bankMatched ? "ALL MATCHED" : "FLAGGED"}
+                </span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+  );
+}
+
 function Panel({ title, badge }) { return <div className="panelhead"><div><p className="eyebrow">AUDIT REVIEW</p><h2>{title}</h2></div><b className="badge">{badge}</b></div>; }
 function Changes({ title, rows, field, threshold }) {
   return (
@@ -1934,8 +2063,6 @@ function CopyPriceExceptionsButton({ prices }) {
     </div>
   );
 }
-
-
 
 function SalesReconciliationView() {
   const [platform, setPlatform] = useState("zomato"); // zomato | swiggy | dineout | zpay | paytm | pos | zip
@@ -2222,7 +2349,10 @@ function SalesReconciliationView() {
             </div>
             <div style={{ display: "flex", gap: 10 }}>
               <button onClick={() => exportReconWorkbook(report)} style={{ background: "rgba(255,255,255,0.15)", border: "1px solid rgba(255,255,255,0.3)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}>
-                📥 Download Excel (.xlsx)
+                📥 Quick Export (.xlsx)
+              </button>
+              <button onClick={() => exportFullReconWorkbook(report)} style={{ background: "var(--lime)", border: "1px solid var(--lime)", color: "var(--forest)", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: "0.82rem" }}>
+                📊 Full Report (Summary / Cashflow / Profit / Discrepancies)
               </button>
               <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}>
                 🔄 Start New Recon
@@ -2396,6 +2526,25 @@ function SalesReconciliationView() {
               </table>
             </div>
           </section>
+
+          {/* Cashflow Statement */}
+          <LineItemBreakdownTable
+            title={`${report.platform} Cash Flow Statement`}
+            subtitle="LINE-BY-LINE CASHFLOW"
+            report={report}
+            rowDefs={getCashflowRowDefs(report)}
+          />
+
+          {/* Profit Statement */}
+          <LineItemBreakdownTable
+            title={`${report.platform} Profit Statement`}
+            subtitle="PROFIT & TAX ADJUSTMENTS"
+            report={report}
+            rowDefs={getProfitRowDefs(report)}
+          />
+
+          {/* Discrepancies */}
+          <DiscrepancyTable report={report} />
         </div>
       )}
 
@@ -2804,6 +2953,3 @@ function SalesReconciliationView() {
     </div>
   );
 }
-
-
-

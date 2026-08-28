@@ -481,16 +481,22 @@ export async function runZomatoRecon({
     const discounts = d.discountDelivered;
     const gstCollected = d.gstDelivered;
     const netSalesExclGst = Math.max(0, grossSales - discounts);
+    const netSalesInclGst = netSalesExclGst + gstCollected;
 
     // Zomato's own service/convenience/long-distance fees carry 18% GST on
     // top of the raw column value in the settlement report.
     const commission = d.baseServiceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER;
-    const otherChargesGrossed =
-      d.convenienceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER +
-      (d.longDistanceFeeDelivered - d.discountOnLongDistanceDelivered) * ZOMATO_FEE_GST_MULTIPLIER -
-      d.discountOnServiceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER;
-    const taxAdjustments = d.tdsAll + d.tcsAll + d.gstPaidByZomatoAll;
+    const convenienceFee = d.convenienceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER;
+    const discountOnServiceFee = d.discountOnServiceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER;
+    const longDistanceFee = (d.longDistanceFeeDelivered - d.discountOnLongDistanceDelivered) * ZOMATO_FEE_GST_MULTIPLIER;
+    const otherChargesGrossed = convenienceFee + longDistanceFee - discountOnServiceFee;
+    const taxAdjustments = d.tdsAll + d.tcsAll + d.gstPaidByZomatoAll; // used for the total deduction math (unchanged)
+    const tdsAndTcsOnly = d.tdsAll + d.tcsAll; // matches the reference sheet's "Tax Adjustments" line, which excludes GST-paid-by-Zomato (that sits inside Profit instead)
     const otherDeductions = otherChargesGrossed + taxAdjustments + d.marketingAds + d.hyperpure;
+    const profitFromZomato = Math.max(
+      0,
+      netSalesInclGst - commission - otherChargesGrossed - d.marketingAds - d.hyperpure - d.gstPaidByZomatoAll
+    );
 
     const netPayout = Math.max(0, netSalesExclGst + gstCollected - commission - otherDeductions);
 
@@ -501,13 +507,29 @@ export async function runZomatoRecon({
       weekNum: w.weekNum,
       label: w.label,
       orders: d.orders,
-      grossSales,
+      // Cashflow-sheet detail (used by the full workbook export; also
+      // available for the on-screen table).
+      itemSales: d.itemTotalDelivered,
       packagingCharges: d.packagingDelivered,
+      compensation: d.compensationCancelled,
       discounts,
       gstCollected,
+      netSales: netSalesInclGst,
+      grossSales,
       netSalesExclGst,
       commission,
+      convenienceFee,
+      discountOnServiceFee,
+      longDistanceFee,
+      otherChargesGrossed,
+      profitFromZomato,
+      tds: d.tdsAll,
+      tcs: d.tcsAll,
+      gstPaidByZomato: d.gstPaidByZomatoAll,
+      taxAdjustments,
+      tdsAndTcsOnly,
       marketingAds: d.marketingAds,
+      hyperpure: d.hyperpure,
       otherDeductions,
       expectedPayout: netPayout,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
@@ -518,20 +540,35 @@ export async function runZomatoRecon({
   });
 
   // Calculate Totals
+  const sum = (key) => weeks.reduce((s, w) => s + w[key], 0);
   const total = {
     label: "Total",
-    orders: weeks.reduce((s, w) => s + w.orders, 0),
-    grossSales: weeks.reduce((s, w) => s + w.grossSales, 0),
-    packagingCharges: weeks.reduce((s, w) => s + w.packagingCharges, 0),
-    discounts: weeks.reduce((s, w) => s + w.discounts, 0),
-    gstCollected: weeks.reduce((s, w) => s + w.gstCollected, 0),
-    netSalesExclGst: weeks.reduce((s, w) => s + w.netSalesExclGst, 0),
-    commission: weeks.reduce((s, w) => s + w.commission, 0),
-    marketingAds: weeks.reduce((s, w) => s + w.marketingAds, 0),
-    otherDeductions: weeks.reduce((s, w) => s + w.otherDeductions, 0),
-    expectedPayout: weeks.reduce((s, w) => s + w.expectedPayout, 0),
-    bankActual: weeks.reduce((s, w) => s + w.bankActual, 0),
-    bankDiff: weeks.reduce((s, w) => s + w.bankDiff, 0),
+    orders: sum("orders"),
+    itemSales: sum("itemSales"),
+    packagingCharges: sum("packagingCharges"),
+    compensation: sum("compensation"),
+    discounts: sum("discounts"),
+    gstCollected: sum("gstCollected"),
+    netSales: sum("netSales"),
+    grossSales: sum("grossSales"),
+    netSalesExclGst: sum("netSalesExclGst"),
+    commission: sum("commission"),
+    convenienceFee: sum("convenienceFee"),
+    discountOnServiceFee: sum("discountOnServiceFee"),
+    longDistanceFee: sum("longDistanceFee"),
+    otherChargesGrossed: sum("otherChargesGrossed"),
+    profitFromZomato: sum("profitFromZomato"),
+    tds: sum("tds"),
+    tcs: sum("tcs"),
+    gstPaidByZomato: sum("gstPaidByZomato"),
+    taxAdjustments: sum("taxAdjustments"),
+    tdsAndTcsOnly: sum("tdsAndTcsOnly"),
+    marketingAds: sum("marketingAds"),
+    hyperpure: sum("hyperpure"),
+    otherDeductions: sum("otherDeductions"),
+    expectedPayout: sum("expectedPayout"),
+    bankActual: sum("bankActual"),
+    bankDiff: sum("bankDiff"),
     bankMatched: weeks.every((w) => w.bankMatched),
     utr: "—",
   };
@@ -1275,5 +1312,165 @@ export function exportReconWorkbook(report) {
   XLSX.utils.book_append_sheet(wb, ws, "Reconciliation Summary");
 
   const fileName = `${report.clientName}_${report.platform.replace(/\s+/g, "_")}_Recon_${report.month}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SHARED LINE-ITEM ROW DEFINITIONS — used by both the on-screen breakdown
+// tables (page.js) and the downloadable multi-sheet workbook below, so the
+// two views can never drift out of sync. Zomato gets the fully detailed,
+// line-item-accurate rows (validated against real settlement data). Other
+// platforms currently fall back to the common fields the recon engines
+// already compute.
+// ═════════════════════════════════════════════════════════════════════════════
+const r2 = (v) => Math.round((v || 0) * 100) / 100;
+
+export function isZomatoDetailed(report) {
+  return report.platform === "Zomato" && report.weeks.length > 0 && "itemSales" in report.weeks[0];
+}
+
+// Each row: [label, getter(weekOrTotal), kind] — kind is a display hint
+// ("add" | "less" | "subtotal" | "total" | "variance" | "plain") used by the
+// on-screen table for styling; the workbook export ignores it.
+export function getCashflowRowDefs(report) {
+  if (isZomatoDetailed(report)) {
+    return [
+      ["Item sales (Delivered orders)", (x) => x.itemSales, "plain"],
+      ["Add:- Packing charges", (x) => x.packagingCharges, "add"],
+      ["Add:- Compensation paid for cancelled orders", (x) => x.compensation, "add"],
+      ["Less:- Discount", (x) => -x.discounts, "less"],
+      ["Add:- GST", (x) => x.gstCollected, "add"],
+      ["Net Sales", (x) => x.netSales, "subtotal"],
+      ["Less:- Commission (Platform Fee, incl. GST)", (x) => -x.commission, "less"],
+      ["Less:- Convenience Fee (incl. GST)", (x) => -x.convenienceFee, "less"],
+      ["Less:- Long Distance Fee (incl. GST)", (x) => -x.longDistanceFee, "less"],
+      ["Add:- Discount on Service Fee (incl. GST)", (x) => x.discountOnServiceFee, "add"],
+      ["Less:- Marketing/Ads", (x) => -x.marketingAds, "less"],
+      ["Less:- Hyperpure", (x) => -x.hyperpure, "less"],
+      ["Less:- GST collected & paid by Zomato", (x) => -x.gstPaidByZomato, "less"],
+      ["Profit from Zomato", (x) => x.profitFromZomato, "subtotal"],
+      ["Less:- TDS 194O", (x) => -x.tds, "less"],
+      ["Less:- TCS", (x) => -x.tcs, "less"],
+      ["Expected Payout / Receipts", (x) => x.expectedPayout, "total"],
+      ["Bank Actual", (x) => x.bankActual, "plain"],
+      ["Variance", (x) => x.bankDiff, "variance"],
+    ];
+  }
+  return [
+    ["Gross Sales / Total Income", (x) => x.grossSales ?? x.totalIncome ?? x.salesInclGst ?? 0, "plain"],
+    ["Less:- Discount", (x) => -(x.discounts || 0), "less"],
+    ["Add:- GST", (x) => x.gstCollected ?? x.gst5Pct ?? 0, "add"],
+    ["Less:- Commission", (x) => -(x.commission ?? x.commissionInclGst ?? 0), "less"],
+    ["Less:- Other Deductions/Taxes", (x) => -(x.otherDeductions ?? x.taxesAndDeductions ?? 0), "less"],
+    ["Expected Payout / Receipts", (x) => x.expectedPayout ?? x.expectedReceipt ?? 0, "total"],
+    ["Bank Actual", (x) => x.bankActual || 0, "plain"],
+    ["Variance", (x) => x.bankDiff || 0, "variance"],
+  ];
+}
+
+export function getProfitRowDefs(report) {
+  if (isZomatoDetailed(report)) {
+    return [
+      ["A. Net Sales", (x) => x.netSales, "plain"],
+      ["B. Less:- Commission", (x) => -x.commission, "less"],
+      ["C. Less:- Other Charges (Convenience/Long Distance − Discount on Service Fee)", (x) => -x.otherChargesGrossed, "less"],
+      ["D. Less:- Marketing/Ads & Hyperpure", (x) => -(x.marketingAds + x.hyperpure), "less"],
+      ["D2. Less:- GST collected & paid by Zomato", (x) => -x.gstPaidByZomato, "less"],
+      ["Profit from Zomato (A − B − C − D − D2)", (x) => x.profitFromZomato, "subtotal"],
+      ["E. Less:- Tax Adjustments (TDS + TCS)", (x) => -x.tdsAndTcsOnly, "less"],
+      ["Expected Receipts (Profit − E)", (x) => x.expectedPayout, "total"],
+    ];
+  }
+  return [
+    ["A. Net Sales (Gross Sales − Discounts + GST)", (x) => (x.grossSales ?? x.totalIncome ?? x.salesInclGst ?? 0) - (x.discounts || 0) + (x.gstCollected ?? x.gst5Pct ?? 0), "plain"],
+    ["B. Less:- Commission", (x) => -(x.commission ?? x.commissionInclGst ?? 0), "less"],
+    ["C. Less:- Other Deductions/Taxes", (x) => -(x.otherDeductions ?? x.taxesAndDeductions ?? 0), "less"],
+    ["Expected Payout (A − B − C)", (x) => x.expectedPayout ?? x.expectedReceipt ?? 0, "total"],
+  ];
+}
+
+function buildLineRowsAoa(report, rowDefs) {
+  const header = ["Details", ...report.weeks.map((w) => w.label), "Total"];
+  const body = rowDefs.map(([label, getter]) => [
+    label,
+    ...report.weeks.map((w) => r2(getter(w))),
+    r2(getter(report.total)),
+  ]);
+  return [header, ...body];
+}
+
+export function exportFullReconWorkbook(report) {
+  const wb = XLSX.utils.book_new();
+  const generated = new Date().toLocaleString("en-IN");
+
+  // ── Summary sheet ──────────────────────────────────────────────────────
+  const summaryRows = [
+    [`${report.clientName} — ${report.platform} Summary (${report.month})`],
+    ["Generated:", generated],
+    [],
+    ["Details", ...report.weeks.map((w) => w.label), "Total"],
+    ["No. of Orders", ...report.weeks.map((w) => w.orders), report.total.orders],
+    [
+      "Gross Sales (₹)",
+      ...report.weeks.map((w) => r2(w.grossSales ?? w.totalIncome ?? w.salesInclGst)),
+      r2(report.total.grossSales ?? report.total.totalIncome ?? report.total.salesInclGst),
+    ],
+    [
+      "Expected Payout (₹)",
+      ...report.weeks.map((w) => r2(w.expectedPayout ?? w.expectedReceipt)),
+      r2(report.total.expectedPayout ?? report.total.expectedReceipt),
+    ],
+    ["Bank Actual (₹)", ...report.weeks.map((w) => r2(w.bankActual)), r2(report.total.bankActual)],
+    ["Bank Statement Attached?", report.hasBank ? "Yes" : "No"],
+    ["Source Files Processed", report.filesCount],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryRows), "Summary");
+
+  // ── Cashflow sheet ─────────────────────────────────────────────────────
+  const cashflowRows = [
+    [`${report.clientName} ${report.platform} Cash Flow — ${report.month}`],
+    [],
+    ...buildLineRowsAoa(report, getCashflowRowDefs(report)),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(cashflowRows), "Cashflow");
+
+  // ── Profit statement sheet ─────────────────────────────────────────────
+  const profitRows = [
+    [`${report.clientName} ${report.platform} Profit Statement — ${report.month}`],
+    [],
+    ...buildLineRowsAoa(report, getProfitRowDefs(report)),
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(profitRows), "Profit statement");
+
+  // ── Discrepancies sheet ────────────────────────────────────────────────
+  const discRows = [
+    [`${report.clientName} ${report.platform} Discrepancies — ${report.month}`],
+    [
+      report.hasBank
+        ? "Compares expected payout against the uploaded bank statement."
+        : "No bank statement was uploaded — every week shows as unmatched. Upload a bank statement to check actual settlement vs expected payout.",
+    ],
+    [],
+    ["Week / Period", "Expected Payout (₹)", "Bank Actual (₹)", "Variance (₹)", "UTR", "Status"],
+    ...report.weeks.map((w) => [
+      w.label,
+      r2(w.expectedPayout ?? w.expectedReceipt),
+      r2(w.bankActual),
+      r2(w.bankDiff),
+      w.utr || "—",
+      w.bankMatched ? "MATCHED" : "DISCREPANCY",
+    ]),
+    [
+      report.total.label,
+      r2(report.total.expectedPayout ?? report.total.expectedReceipt),
+      r2(report.total.bankActual),
+      r2(report.total.bankDiff),
+      "—",
+      report.total.bankMatched ? "ALL MATCHED" : "FLAGGED",
+    ],
+  ];
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(discRows), "Discrepancies");
+
+  const fileName = `${report.clientName}_${report.platform.replace(/\s+/g, "_")}_Full_Report_${report.month}.xlsx`;
   XLSX.writeFile(wb, fileName);
 }
