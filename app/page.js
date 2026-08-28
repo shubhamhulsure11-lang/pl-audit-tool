@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
+import { matchItemToKnowledge, normalizeItemName } from "@/app/lib/knowledge";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const clean = (v) => String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -8,9 +9,8 @@ const n = (v) => typeof v === "number" ? v : Number(String(v ?? "").replace(/[,�
 const show = (v) => inr.format(v || 0);
 const col = (heads, choices) => choices.map(clean).map(x => heads.map(clean).indexOf(x)).find(x => x >= 0) ?? -1;
 
-// ── TAXONOMY: Only specific brands + unambiguous multi-word phrases ──────────
-// RULE: No generic single words (oil, slice, wheat, apple, etc.) — they cause false positives.
-// Single words are only allowed when they are UNAMBIGUOUS in a restaurant context (e.g. "prawns", "paneer", "mutton").
+// ── TAXONOMY: fallback-only rule engine ─────────────────────────────────────
+// NOTE: This is now SECONDARY. Client Knowledge Base is always checked first.
 const RESTAURANT_TAXONOMY = [
   {
     id: "cigarettes",
@@ -78,127 +78,159 @@ const RESTAURANT_TAXONOMY = [
     ]
   },
   {
-    id: "beverages",
-    label: "Beverages",
-    aliases: ["beverage", "soft drink", "drinks", "cold drink", "non alcoholic"],
-    keywords: [
-      "real apple juice", "real mango juice", "real orange juice", "real cranberry", "real pineapple",
-      "real litchi", "real juice", "tropicana", "minute maid", "raw pressery", "paper boat",
-      "red bull", "redbull", "monster energy", "sting energy",
-      "tonic water", "schweppes tonic", "ginger ale", "gin ale", "schw gin ale", "club soda", "soda water", "lehar soda", "kinley soda",
-      "diet coke", "coke zero", "coca cola", "thums up", "limca", "sprite", "fanta", "mirinda", "mountain dew", "pepsi",
-      "bisleri", "kinley water", "aquafina", "vedica", "himalayan water", "packaged water", "mineral water",
-      "monin", "malas", "malass",
-      "watermelon syrup", "strawberry crush", "blueberry crush", "kiwi crush", "litchi crush",
-      "orange crush", "pineapple crush", "mojito syrup", "grenadine", "blue curacao",
-      "fruit syrup", "mocktail syrup",
-      "frooti", "maaza", "appy fizz"
-    ]
-  },
-  {
-    id: "groceries",
-    label: "Groceries",
-    aliases: ["grocer", "grocery", "provision", "dry good", "raw material", "staple", "spices", "grain", "ingredients"],
-    keywords: [
-      "sona masoori", "basmati rice", "kolam rice", "ponni rice", "rice", "basmati", "kolam",
-      "wheat flour", "atta", "maida", "sooji", "semolina", "besan", "cornflour", "corn flour",
-      "cornstarch", "custard powder", "bread crumbs", "breadcrumbs",
-      "toor dal", "tur dal", "moong dal", "mung dal", "urad dal", "chana dal",
-      "kabuli chana", "rajma", "soya chunks", "poha", "vermiceli", "sevai", "noodles", "pasta", "macaroni", "spaghetti", "croutons", "dal", "lentil", "lentils",
-      "garam masala", "chaat masala", "biryani masala", "kitchen king masala", "pav bhaji masala", "sambar powder", "rasam powder", "coriander powder", "chilli powder", "turmeric powder", "mustard seed", "fenugreek seed", "methi seed", "bay leaf", "tej patta", "black pepper", "kali mirch", "white pepper", "kasuri methi", "red chilli powder", "kashmiri chilli", "degi mirch", "chili flakes",
-      "spices", "masala", "haldi", "turmeric", "jeera", "cumin", "dhania", "rai", "sarson", "saunf", "fennel", "cardamom", "elaichi", "laung", "cinnamon", "dalchini", "star anise", "nutmeg", "jaiphal", "saffron", "kesar", "ajwain", "kalonji", "hing", "asafoetida", "oregano", "thyme", "rosemary", "paprika",
-      "sunflower oil", "mustard oil", "groundnut oil", "peanut oil", "sesame oil", "til oil", "olive oil", "canola oil", "soybean oil", "palm oil", "vanaspati", "dalda", "refined oil", "cooking oil",
-      "desi ghee", "cow ghee", "buffalo ghee", "amul ghee", "ghee",
-      "brown sugar", "jaggery", "gur", "honey", "rock salt", "black salt", "sendha namak", "pink salt", "baking soda", "baking powder", "yeast", "citric acid", "ajinomoto", "msg", "sugar", "salt",
-      "tomato ketchup", "red chilli sauce", "green chilli sauce", "soya sauce", "dark soy", "white vinegar", "apple cider vinegar", "sriracha", "tabasco", "schezwan sauce", "mayonnaise", "mayo", "mustard paste", "salsa", "peri peri sauce", "ketchup", "vinegar", "wine vinegar", "cooking wine", "shao hsing",
-      "pickle", "achaar", "murabba", "chutney", "papad", "appalam", "tamarind", "imli", "desiccated coconut", "black olive", "green olive", "stuffed olive", "olive slice",
-      "coconut milk powder", "coconut milk", "coconut cream", "maggi coconut",
-      "cashew", "kaju", "badam", "almond", "kismis", "raisin", "pista", "pistachio", "walnut", "akhrot", "dates", "khajoor", "melon seeds", "poppy seeds", "khus khus",
-      "cocoa powder", "cooking chocolate", "chocolate chips", "vanilla essence", "vanilla extract", "vanilla 4ltr", "food color", "food colouring",
-      "knorr chicken broth", "chicken broth", "chicken powder", "knorr", "broth powder", "bouillon", "seasoning powder", "crab cake mix"
-    ]
-  },
-  {
     id: "dairy",
     label: "Dairy",
-    aliases: ["dairy", "milk product"],
+    aliases: ["dairy", "milk", "cream", "butter", "cheese", "paneer", "curd", "yogurt", "ghee"],
     keywords: [
-      "toned milk", "full cream milk", "cow milk", "buffalo milk", "cottage cheese", "hung curd", "fresh cream", "amul cream", "sour cream", "whipped cream", "salted butter", "unsalted butter", "table butter", "mozzarella", "cheddar cheese", "cheese slice", "cheese block", "cream cheese",
-      "fresh milk", "paneer", "curd", "dahi", "yogurt", "yoghurt", "cream", "butter", "cheese", "khoya", "mawa", "buttermilk", "chaas", "lassi"
+      "amul butter", "amul cream", "amul cheese", "amul milk", "amul ghee",
+      "milky mist", "govardhan ghee", "mother dairy", "nandini",
+      "full cream milk", "toned milk", "double toned milk", "skimmed milk",
+      "fresh cream", "whipping cream", "heavy cream",
+      "mozzarella", "cheddar", "parmesan", "processed cheese", "cheese slice", "cheese block",
+      "paneer", "fresh paneer", "malai paneer",
+      "curd", "dahi", "yogurt", "greek yogurt",
+      "ghee", "clarified butter", "white butter",
+      "condensed milk", "evaporated milk", "khoa", "mawa", "rabdi"
     ]
   },
   {
-    id: "other_purchases",
-    label: "Other Purchases",
-    aliases: ["other purchase", "other purchases", "misc", "miscellaneous", "general purchase", "other expense"],
+    id: "beverages",
+    label: "Beverages",
+    aliases: ["beverage", "soft drink", "juice", "soda", "mocktail", "cold drink"],
     keywords: [
-      "wood charcoal", "charcoal", "coal",
-      "ice slab", "ice slabs", "ice cube", "ice cubes", "crushed ice", "dry ice",
-      "wooden skewers", "bamboo skewers", "skewers", "toothpick", "toothpicks", "birthday candles", "matchbox"
-    ]
-  },
-  {
-    id: "kitchen_tools",
-    label: "Kitchen tools",
-    aliases: ["kitchen tool", "kitchen tools", "utensil", "utensils", "crockery", "cutlery", "hotelware", "equipment", "bar tool"],
-    keywords: [
-      "dal katori", "katori", "dip bowl", "soup bowl", "dip bowl round", "mixing bowl", "salad bowl",
-      "kadai", "fry pan", "sauce pan", "tawa", "dosa tawa", "pressure cooker", "patila", "strainer", "colander", "ladle", "karchi", "chef knife", "chopping knife", "peeler", "grater", "chopping board", "cutting board", "tongs", "chimta", "whisk", "rolling pin", "belan", "chakla", "baking tray", "sizzler plate",
-      "plate ceramic", "bowl ceramic", "crockery", "hotelware", "glassware", "arcoroc", "pilsner glass", "pilsner", "beer glass", "wine glass", "shot glass", "whisky glass", "water glass",
-      "cocktail shaker", "bar strainer", "jigger", "peg measurer", "muddler", "bar spoon", "pourer", "corkscrew", "bottle opener"
-    ]
-  },
-  {
-    id: "cleaning",
-    label: "Cleaning and housekeeping",
-    aliases: ["clean", "housekeep", "sanit", "hygiene", "detergent", "soap"],
-    keywords: [
-      "dishwash bar", "dishwash liquid", "dishwash", "vim bar", "vim liquid", "vim", "exo", "pril", "surf excel", "surf", "ariel", "tide", "rin", "detergent powder", "liquid detergent", "detergent",
-      "soap oil", "soap oil thick", "liquid soap", "bar soap",
-      "floor cleaner", "lizol", "phenyl", "white phenyl", "colin", "glass cleaner", "harpic", "toilet cleaner", "bathroom cleaner", "drain cleaner", "caustic soda",
-      "bleaching powder", "bleach", "disinfectant", "hand sanitizer", "sanitizer", "hand wash", "lifebuoy", "dettol", "savlon",
-      "phool jhadu", "coconut broom", "broom", "jhadu", "mop", "floor wiper", "wiper", "duster", "cleaning cloth", "microfiber cloth", "sponge", "steel scrubber", "green scrubber", "scrubber", "scotch brite", "garbage bag", "trash bag", "dustbin cover", "dust pan", "rubber gloves", "room freshener", "odonil"
-    ]
-  },
-  {
-    id: "packaging",
-    label: "Packaging & Disposables",
-    aliases: ["packag", "packing", "pack material", "disposab", "takeaway", "parcel"],
-    keywords: [
-      "meal tray", "meal box", "500ml container", "750ml container", "1000ml container", "aluminium container", "foil container", "burger box", "pizza box", "cake box", "sweet box", "plastic container", "food container",
-      "kraft paper bag", "non woven bag", "d-cut bag", "paper bag", "carry bag", "zip lock", "polythene bag",
-      "paper plate", "disposable plate", "paper cup", "plastic glass", "disposable glass",
-      "paper napkin", "cocktail napkin", "tissue paper", "tissue roll", "kitchen roll", "toilet roll", "tissue", "napkin",
-      "aluminium foil", "silver foil", "cling wrap", "cling film", "butter paper", "parchment paper",
-      "paper straw", "plastic straw", "straw", "wooden spoon", "plastic spoon", "wooden fork", "plastic fork", "disposable cutlery", "chopstick", "chopsticks",
-      "banana leaf", "banana leaves", "patra", "serving leaf"
+      "coca cola", "pepsi", "sprite", "fanta", "7up", "thums up", "limca", "maaza",
+      "mirinda", "mountain dew", "red bull", "monster energy",
+      "frooti", "slice mango", "real juice", "tropicana",
+      "coconut water", "tender coconut", "coco", "kingcoconut",
+      "cold coffee", "iced tea", "ice tea", "lemonade",
+      "tonic water", "club soda", "soda water", "ginger beer", "ginger ale",
+      "monin", "monin syrup", "torani", "da vinci syrup",
+      "green tea", "herbal tea", "chai mix",
+      "packaged water", "mineral water", "bisleri", "kinley", "aquafina"
     ]
   },
   {
     id: "vegetables",
-    label: "Fresh Vegetables",
-    aliases: ["vegetable", "fresh veg", "veggie", "greens", "sabzi", "tarkari"],
+    label: "Vegetables",
+    aliases: ["vegetable", "sabzi", "tarkari", "greens", "fresh produce"],
     keywords: [
-      "thai red chilli", "thai chilli", "green chilli", "hari mirch", "bell pepper", "shimla mirch", "capsicum", "green peas", "matar", "coriander leaves", "fresh dhania", "mint leaves", "pudina", "curry leaves", "kadi patta", "spring onion", "button mushroom", "baby corn", "sweet corn", "lady finger", "bottle gourd", "bitter gourd", "raw banana",
-      "onion", "pyaz", "potato", "aloo", "tomato", "tamatar", "ginger", "adrak", "garlic", "lahsun", "carrot", "gajar", "beans", "cabbage", "cauliflower", "broccoli", "spinach", "palak", "methi", "lettuce", "iceberg", "cucumber", "kheera", "beetroot", "radish", "mooli", "leek", "celery", "zucchini", "mushroom", "bhindi", "okra", "brinjal", "baingan", "eggplant", "lauki", "karela", "pumpkin", "kaddu", "lemon", "nimbu", "drumstick"
+      "tomato", "onion", "potato", "garlic", "ginger", "carrot", "beans", "cabbage",
+      "capsicum", "bell pepper", "brinjal", "eggplant", "cauliflower", "broccoli",
+      "spinach", "palak", "methi", "fenugreek", "coriander", "curry leaves", "kadi patta",
+      "mint leaves", "pudina", "green chilli", "red chilli", "chilli",
+      "lady finger", "bhindi", "okra", "bitter gourd", "karela",
+      "bottle gourd", "lauki", "ridge gourd", "turai", "ash gourd",
+      "raw banana", "raw plantain", "yam", "suran", "colocasia", "arbi",
+      "drumstick", "moringa", "cluster beans", "valor papdi",
+      "spring onion", "leek", "celery", "baby corn", "sweet corn", "zucchini",
+      "cherry tomato", "lettuce", "iceberg", "arugula", "kale",
+      "mushroom", "button mushroom", "oyster mushroom", "portobello"
     ]
   },
   {
     id: "fruits",
-    label: "Fresh Fruits",
-    aliases: ["fruit", "fresh fruit"],
+    label: "Fruits",
+    aliases: ["fruit", "seasonal fruit", "imported fruit"],
     keywords: [
-      "sweet lime", "fresh mango", "blueberry fresh", "fresh strawberry",
-      "fresh apple", "seb", "fresh banana", "kela", "fresh orange", "santra", "mosambi", "pomegranate", "anar", "fresh watermelon", "tarbooj", "muskmelon", "kharbuj", "papaya", "papita", "fresh pineapple", "ananas", "aam", "grapes", "angoor", "kiwi", "guava", "amrood", "pear", "chikoo", "dragonfruit", "plum", "peach", "cherry"
+      "apple", "banana", "mango", "papaya", "guava", "pineapple", "watermelon",
+      "muskmelon", "cantaloupe", "grapes", "pomegranate", "chikoo", "sapodilla",
+      "orange", "sweet lime", "mosambi", "lemon", "lime",
+      "kiwi", "strawberry", "blueberry", "raspberry", "avocado",
+      "pear", "peach", "plum", "cherry", "fig", "dates", "dragon fruit", "passion fruit"
+    ]
+  },
+  {
+    id: "groceries",
+    label: "Groceries / Provisions",
+    aliases: ["grocer", "grocery", "provision", "dry goods", "pantry", "raw material"],
+    keywords: [
+      "rice", "basmati rice", "ponni rice", "sona masoori", "jeera rice",
+      "wheat flour", "maida", "atta", "semolina", "suji", "rawa",
+      "dal", "lentils", "moong dal", "toor dal", "chana dal", "masoor dal", "urad dal",
+      "oil", "sunflower oil", "groundnut oil", "canola oil", "palm oil", "olive oil",
+      "coconut oil", "rice bran oil", "saffola", "fortune oil",
+      "sugar", "jaggery", "honey",
+      "salt", "rock salt", "pink salt",
+      "vinegar", "apple cider vinegar",
+      "soya sauce", "oyster sauce", "fish sauce", "worcestershire",
+      "tomato ketchup", "tomato puree", "tomato paste",
+      "corn flour", "corn starch", "arrowroot",
+      "baking powder", "baking soda", "yeast",
+      "vanilla essence", "food colour", "edible colour",
+      "cashew", "almond", "pistachio", "walnut", "raisin", "sultana",
+      "peanut", "groundnut",
+      "black pepper", "cumin", "jeera", "coriander seed", "turmeric", "haldi",
+      "garam masala", "biryani masala", "chaat masala", "kitchen king",
+      "red chilli powder", "paprika", "kashmiri chilli",
+      "cardamom", "cloves", "cinnamon", "bay leaf", "star anise", "mace", "nutmeg"
+    ]
+  },
+  {
+    id: "packaging",
+    label: "Packaging / Disposables",
+    aliases: ["packaging", "disposable", "takeaway", "parcel", "container", "wrapping"],
+    keywords: [
+      "food container", "meal box", "lunch box", "parcel box", "takeaway box",
+      "foil container", "aluminium container", "aluminium foil",
+      "paper cup", "plastic cup", "cold cup", "hot cup",
+      "straw", "spoon", "fork", "knife", "plastic cutlery",
+      "paper plate", "plastic plate", "banana leaf", "areca leaf",
+      "tissue paper", "napkin", "paper napkin",
+      "butter paper", "baking paper", "parchment",
+      "cling wrap", "cling film", "shrink wrap",
+      "ziplock bag", "plastic bag", "carry bag", "grocery bag",
+      "paper bag", "kraft bag",
+      "toothpick", "skewer", "cocktail pick",
+      "cup lid", "container lid"
+    ]
+  },
+  {
+    id: "cleaning",
+    label: "Cleaning / Housekeeping",
+    aliases: ["cleaning", "housekeeping", "sanitation", "hygiene", "laundry"],
+    keywords: [
+      "vim bar", "vim liquid", "pril", "exo", "dishwash liquid", "dishwash bar",
+      "harpic", "domex", "lizol", "toilet cleaner", "drain cleaner",
+      "colin", "glass cleaner", "surface cleaner", "floor cleaner", "floor liquid",
+      "dettol", "savlon", "antiseptic",
+      "hand wash", "liquid hand wash", "hand sanitizer", "sanitizer",
+      "soap bar", "bathing soap", "lifebuoy", "lux soap",
+      "surf excel", "ariel", "tide", "rin", "washing powder", "detergent powder",
+      "comfort", "fabric softener",
+      "phenyl", "black phenyl", "white phenyl",
+      "broom", "jhadu", "mop", "wiper", "scrubber", "sponge", "scotch brite",
+      "gloves", "rubber gloves", "apron", "hair net", "cap",
+      "garbage bag", "dustbin liner", "trash bag"
+    ]
+  },
+  {
+    id: "kitchen_tools",
+    label: "Kitchen Tools / Equipment",
+    aliases: ["equipment", "hotelware", "kitchen tool", "crockery", "cutlery", "utensil"],
+    keywords: [
+      "knife", "chef knife", "bread knife", "peeler", "grater", "chopping board",
+      "pan", "kadai", "wok", "frying pan", "saute pan", "stock pot",
+      "tongs", "ladle", "spatula", "skimmer", "whisk", "beater",
+      "mixing bowl", "salad bowl", "serving bowl",
+      "plate", "dinner plate", "side plate", "soup bowl",
+      "glass", "tumbler", "mug", "cup", "saucer",
+      "spoon", "dessert spoon", "soup spoon", "tablespoon",
+      "fork", "salad fork", "dessert fork",
+      "tray", "serving tray", "waiter tray",
+      "bottle opener", "cork screw", "can opener",
+      "thermometer", "kitchen thermometer", "probe"
     ]
   },
   {
     id: "stationery",
-    label: "Stationery & Office",
-    aliases: ["station", "office supplies", "printing", "paper"],
+    label: "Stationery / Office Supplies",
+    aliases: ["stationery", "office supply", "paper", "printing"],
     keywords: [
-      "attendance register", "bill book", "kot book", "receipt book", "permanent marker", "ball pen", "gel pen", "pos roll", "billing roll", "thermal roll", "printer cartridge", "toner cartridge",
-      "register", "notebook", "pencil", "marker", "stapler", "stapler pin", "punch machine", "brown tape", "cello tape", "scissor", "scissors", "stamp pad", "rubber band", "binder clip", "envelope", "a4 paper", "toner"
+      "attendance register", "bill book", "kot book", "receipt book", "permanent marker", "ball pen", "gel pen",
+      "pos roll", "billing roll", "thermal roll", "printer cartridge", "toner cartridge",
+      "register", "notebook", "pencil", "marker", "stapler", "stapler pin",
+      "punch machine", "brown tape", "cello tape", "scissor", "scissors",
+      "stamp pad", "rubber band", "binder clip", "envelope", "a4 paper", "toner"
     ]
   }
 ];
@@ -207,54 +239,32 @@ function cleanWords(str) {
   return String(str || "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
 }
 
-// Check if actual account string matches category aliases or related categories
 function accountMatchesCategory(actualAccount, category) {
   const normAcc = String(actualAccount || "").toLowerCase();
-  
-  // STAFF WELFARE / ENTERTAINMENT — any food item (raw or cooked) bought under
-  // these accounts is a legitimate expense. Never flag them as mis-classified.
   const isStaffOrExpense = /staff\s*(welfare|food|meal|expense)|entertainment|business\s*meal|petty\s*cash|general\s*expense/i.test(normAcc);
   if (isStaffOrExpense && ["seafood","poultry","groceries","beverages","dairy","vegetables","fruits","liquor"].includes(category.id)) return true;
-
-  // Direct specific exclusions — stop wrong cross-category matches
   if (category.id === "groceries" && normAcc.includes("sea food")) return false;
   if (category.id === "groceries" && (normAcc.includes("poultry") || normAcc.includes("meat"))) return false;
   if (category.id === "groceries" && normAcc.includes("dairy")) return false;
   if (category.id === "beverages" && normAcc.includes("liquor")) return false;
-
-  // Direct alias match
   if (category.aliases.some(alias => normAcc.includes(alias))) return true;
-
-  // Cross-category allowances:
   if (category.id === "packaging" && (normAcc.includes("pack") || normAcc.includes("clean") || normAcc.includes("housekeep") || normAcc.includes("disposab"))) return true;
   if (category.id === "cleaning" && (normAcc.includes("pack") || normAcc.includes("soap") || normAcc.includes("clean") || normAcc.includes("housekeep"))) return true;
   if (category.id === "kitchen_tools" && (normAcc.includes("hotelware") || normAcc.includes("equipment") || normAcc.includes("kitchen") || normAcc.includes("crockery") || normAcc.includes("cutlery"))) return true;
-  // Vegetables & fruits ONLY accepted in groceries/food if caller explicitly opts in (opts.allowVegInGrocery)
-  // This is set to true in detectMisclassifications when the file has NO separate vegetable account.
   if ((category.id === "vegetables" || category.id === "fruits") &&
       (normAcc.includes("vegetable") || normAcc.includes("fruit") || normAcc.includes("tarkari"))) return true;
   if (category.id === "groceries" && (normAcc.includes("grocer") || normAcc.includes("provision") || normAcc.includes("raw material"))) return true;
-
   return false;
 }
 
-// Veto rules: if item contains these signals, ignore certain category matches
 const VETO_RULES = [
-  // Alcohol keywords block cigarette classification
   { blockedCategoryId: "cigarettes", ifItemContains: ["rum", "vodka", "whisky", "whiskey", "gin", "tequila", "brandy", "wine", "beer", "scotch", "bourbon", "liqueur", "bacardi", "smirnoff", "absolut"] },
-  // Non-alcoholic mixers block liquor classification
   { blockedCategoryId: "liquor", ifItemContains: ["ale", "ginger ale", "gin ale", "tonic", "syrup", "essence", "non alcoholic", "non-alcoholic", "mocktail", "vinegar", "cooking wine"] },
-  // Soap / cleaning blocks grocery
   { blockedCategoryId: "groceries", ifItemContains: ["soap", "detergent", "cleaner", "liquid soap", "dishwash", "hand wash"] },
-  // Syrups & cordials block fruit & vegetable — but NOT "leaf"/"leaves"/"patta" because
-  // curry leaves, coriander leaves, mint leaves, kadi patta are VALID vegetables.
-  // Only banana leaves / serving leaves / patra (lotus leaf) should be blocked (they're packing).
   { blockedCategoryId: "fruits", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "patra"] },
   { blockedCategoryId: "vegetables", ifItemContains: ["monin", "syrup", "crush", "malas", "cordial", "patra", "banana leaf", "banana leaves"] },
-  // Processed broth / seasonings / mixes block raw poultry & seafood
   { blockedCategoryId: "poultry", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr", "mix", "curry paste"] },
   { blockedCategoryId: "seafood", ifItemContains: ["broth", "powder", "seasoning", "cube", "bouillon", "knorr", "mix", "vinegar", "sauce", "cake mix"] },
-  // Plant-based milks block dairy
   { blockedCategoryId: "dairy", ifItemContains: ["coconut milk", "coconut", "almond milk", "soy milk", "soya milk", "oat milk", "plant milk", "milk powder"] },
 ];
 
@@ -268,24 +278,18 @@ function isVetoed(categoryId, itemNorm) {
   );
 }
 
-// Find expected category for an item description using strict word-boundary matching
 function classifyItem(itemName) {
   const norm = cleanWords(itemName);
   if (!norm) return null;
-
   let bestMatch = null;
   let maxKeywordLen = 0;
-
   for (const cat of RESTAURANT_TAXONOMY) {
     if (isVetoed(cat.id, norm)) continue;
-
     for (const kw of cat.keywords) {
       const normKw = cleanWords(kw);
       if (!normKw) continue;
-
       const escaped = normKw.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
       const wordRegex = new RegExp(`(^|\\s)${escaped}(\\s|$)`, "i");
-
       if (wordRegex.test(norm)) {
         if (normKw.length > maxKeywordLen) {
           maxKeywordLen = normKw.length;
@@ -297,55 +301,24 @@ function classifyItem(itemName) {
   return bestMatch;
 }
 
-// Auditor: Detect items booked under wrong account heads
-function detectMisclassifications(records) {
+// ─── KNOWLEDGE-FIRST MISCLASSIFICATION DETECTION ────────────────────────────
+function detectMisclassifications(records, knowledgeItems = []) {
   if (!records || !records.length) return [];
-  
+
   const sheetAccounts = [...new Set(records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))];
-  
+
   const findBestSheetAccountName = (category) => {
     const cid = category.id;
-    if (cid === "groceries") {
-      const match = sheetAccounts.find(a => /grocer/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "seafood") {
-      const match = sheetAccounts.find(a => /sea\s*food|fish|prawn/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "poultry") {
-      const match = sheetAccounts.find(a => /poultry|meat|chicken|mutton/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "dairy") {
-      const match = sheetAccounts.find(a => /dairy|milk/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "beverages") {
-      const match = sheetAccounts.find(a => /beverage|soft\s*drink/i.test(a) && !/liquor|alcohol|wine|beer/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "liquor") {
-      const match = sheetAccounts.find(a => /liquor|alcohol|wine|beer|spirit/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "packaging") {
-      const match = sheetAccounts.find(a => /pack|disposab/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "cleaning") {
-      const match = sheetAccounts.find(a => /clean|housekeep/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "vegetables" || cid === "fruits") {
-      const match = sheetAccounts.find(a => /vegetable|fruit/i.test(a));
-      if (match) return match;
-    }
-    if (cid === "cigarettes") {
-      const match = sheetAccounts.find(a => /cigarette|tobacco|smoke/i.test(a));
-      if (match) return match;
-    }
-
+    if (cid === "groceries") { const m = sheetAccounts.find(a => /grocer/i.test(a)); if (m) return m; }
+    if (cid === "seafood") { const m = sheetAccounts.find(a => /sea\s*food|fish|prawn/i.test(a)); if (m) return m; }
+    if (cid === "poultry") { const m = sheetAccounts.find(a => /poultry|meat|chicken|mutton/i.test(a)); if (m) return m; }
+    if (cid === "dairy") { const m = sheetAccounts.find(a => /dairy|milk/i.test(a)); if (m) return m; }
+    if (cid === "beverages") { const m = sheetAccounts.find(a => /beverage|soft\s*drink/i.test(a) && !/liquor|alcohol|wine|beer/i.test(a)); if (m) return m; }
+    if (cid === "liquor") { const m = sheetAccounts.find(a => /liquor|alcohol|wine|beer|spirit/i.test(a)); if (m) return m; }
+    if (cid === "packaging") { const m = sheetAccounts.find(a => /pack|disposab/i.test(a)); if (m) return m; }
+    if (cid === "cleaning") { const m = sheetAccounts.find(a => /clean|housekeep/i.test(a)); if (m) return m; }
+    if (cid === "vegetables" || cid === "fruits") { const m = sheetAccounts.find(a => /vegetable|fruit/i.test(a)); if (m) return m; }
+    if (cid === "cigarettes") { const m = sheetAccounts.find(a => /cigarette|tobacco|smoke/i.test(a)); if (m) return m; }
     const matched = sheetAccounts.find(acc => {
       const normA = acc.toLowerCase();
       if (cid === "groceries" && normA.includes("sea food")) return false;
@@ -355,21 +328,61 @@ function detectMisclassifications(records) {
   };
 
   const map = new Map();
-
-  // Context: does this file have a dedicated vegetables/fruits account?
   const hasVegAccount = sheetAccounts.some(a => /vegetable|fruit|sabzi|tarkari/i.test(a));
 
   records.forEach(r => {
     if (!r.item || !r.account || r.account === "Unassigned Account") return;
+
+    // ── PRIORITY 1: Client Knowledge Base ─────────────────────────────────────
+    if (knowledgeItems.length > 0) {
+      const kbMatch = matchItemToKnowledge(r.item, knowledgeItems);
+      if (kbMatch) {
+        const expectedAcc = kbMatch.account_head;
+        const normLedger = String(r.account).toLowerCase().trim();
+        const normExpected = String(expectedAcc).toLowerCase().trim();
+
+        // Check if the ledger account matches the knowledge account (flexible match)
+        const isCorrect =
+          normLedger === normExpected ||
+          normLedger.includes(normExpected) ||
+          normExpected.includes(normLedger);
+
+        if (isCorrect) return;
+
+        const key = `${r.item}:::${r.vendor}:::${r.account}:::kb`;
+        if (!map.has(key)) {
+          map.set(key, {
+            item: r.item,
+            vendor: r.vendor,
+            actualAccount: r.account,
+            suggestedAccount: expectedAcc,
+            matchedKeyword: `KB match (${kbMatch.matchType})`,
+            reason: `Knowledge Base: "${r.item}" should be under "${expectedAcc}"`,
+            confidence: "High",
+            source: "knowledge",
+            knowledgeMatch: true,
+            kbMatchType: kbMatch.matchType,
+            count: 0,
+            total: 0,
+            rates: []
+          });
+        }
+        const entry = map.get(key);
+        entry.count += 1;
+        entry.total += r.total;
+        if (r.rate > 0) entry.rates.push(r.rate);
+        return;
+      }
+    }
+
+    // ── PRIORITY 2: RESTAURANT_TAXONOMY Rule Engine ───────────────────────────
     const match = classifyItem(r.item);
-    if (!match) return; // Unclassified items are not flagged
+    if (!match) return;
 
     const expectedCat = match.category;
-    // Check if actual account head matches expected category
     const isCorrect = accountMatchesCategory(r.account, expectedCat);
 
     if (!isCorrect) {
-      // Smart skip: if no separate veg/fruit account exists, booking them in Groceries/Food is acceptable
       if (!hasVegAccount &&
           (expectedCat.id === "vegetables" || expectedCat.id === "fruits") &&
           /grocer|provision|raw material|food/i.test(r.account.toLowerCase())) {
@@ -385,7 +398,10 @@ function detectMisclassifications(records) {
           actualAccount: r.account,
           suggestedAccount: suggestedName,
           matchedKeyword: match.keyword,
+          reason: `Rule Engine: matched keyword "${match.keyword}"`,
           confidence: "High",
+          source: "rule_engine",
+          knowledgeMatch: false,
           count: 0,
           total: 0,
           rates: []
@@ -439,10 +455,17 @@ async function readFile(file) {
   return { name: file.name, records, hasAccountCol: i.account >= 0, colMap: i };
 }
 
+async function readFileAsObjects(file) {
+  const data = await file.arrayBuffer();
+  const wb = XLSX.read(data, { type: "array", cellDates: true });
+  const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: "" });
+  return { rows, name: file.name, headers: rows.length > 0 ? Object.keys(rows[0]) : [] };
+}
+
 function groups(rows, key) { return rows.reduce((m, r) => { const k = key(r); m.set(k, [...(m.get(k) || []), r]); return m; }, new Map()); }
 function rollup(rows, field) { return [...groups(rows, r => clean(r[field]) || "unassigned")].map(([key, list]) => ({ key, label: list[0][field] || "Unassigned", total: list.reduce((s, r) => s + r.total, 0) })); }
 
-function analyse(current, previous, thresholds) {
+function analyse(current, previous, thresholds, knowledgeItems = []) {
   const { vendor = 20, item = 25, price = 20 } = thresholds || {};
   const vendorCut = vendor / 100, itemCut = item / 100, priceMult = 1 + price / 100;
   const exact = groups(current.records, r => [clean(r.date), clean(r.vendor), clean(r.bill), clean(r.item), r.qty, r.rate, clean(r.branch)].join("|"));
@@ -463,17 +486,12 @@ function analyse(current, previous, thresholds) {
     rows.forEach(r => { if (r.rate > avg * priceMult) prices.push({ ...r, avg, pct: (r.rate - avg) / avg }); });
   });
 
-  const misclassifications = detectMisclassifications(current.records);
+  const misclassifications = detectMisclassifications(current.records, knowledgeItems);
 
-  return {
-    duplicates,
-    vendors: compare("vendor", vendorCut),
-    items: compare("item", itemCut),
-    prices: prices.sort((a, b) => b.pct - a.pct),
-    misclassifications
-  };
+  return { duplicates, vendors: compare("vendor", vendorCut), items: compare("item", itemCut), prices: prices.sort((a, b) => b.pct - a.pct), misclassifications };
 }
 
+// ─── UI PRIMITIVES ──────────────────────────────────────────────────────────
 function Upload({ title, file, onChange, help }) {
   return <label className="upload"><input type="file" accept=".xlsx,.xls,.csv" onChange={e => e.target.files[0] && onChange(e.target.files[0])} /><span>↑</span><strong>{title}</strong><small>{file?.name || help}</small><em>{file ? "Replace file" : "Choose Excel or CSV"}</em></label>;
 }
@@ -483,73 +501,46 @@ function ThresholdInput({ label, value, onChange, maxVal = 100 }) {
   return <label className="thresh-label">{label}<div className="thresh-wrap"><input className="thresh-input" type="number" min="0" max={maxVal} value={value} onChange={e => onChange(Math.max(0, Math.min(maxVal, e.target.value === "" ? 0 : Number(e.target.value) || 0)))} /><span className="thresh-pct">%</span></div></label>;
 }
 
-function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sharedModel, onOpenSetup, sharedAccounts }) {
+// ─── MISCLASSIFICATIONS VIEW ─────────────────────────────────────────────────
+function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sharedModel, onOpenSetup, sharedAccounts, clientId, onSaveToKnowledge }) {
   const [q, setQ] = useState("");
-  const [rowAiState, setRowAiState] = useState({}); // { [itemKey]: { loading, result, error, countdown } }
+  const [rowAiState, setRowAiState] = useState({});
   const [aiResults, setAiResults] = useState([]);
+  const [savedRows, setSavedRows] = useState(new Set());
+  const [savingRows, setSavingRows] = useState(new Set());
 
   const askAiForRow = async (x) => {
     const rowKey = `${x.item}:::${x.vendor}`;
-    if (!sharedApiKey || !sharedModel) {
-      onOpenSetup();
-      return;
-    }
+    if (!sharedApiKey || !sharedModel) { onOpenSetup(); return; }
     setRowAiState(prev => ({ ...prev, [rowKey]: { loading: true, result: null, error: null, countdown: 0 } }));
     try {
       const res = await fetch("/api/ai-audit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          singleItem: {
-            item: x.item,
-            vendor: x.vendor,
-            actualAccount: x.actualAccount,
-            suggestedAccount: x.suggestedAccount,   // Rule engine suggestion
-            matchedKeyword: x.matchedKeyword,         // Detection reason
-            total: x.total
-          },
+          singleItem: { item: x.item, vendor: x.vendor, actualAccount: x.actualAccount, suggestedAccount: x.suggestedAccount, matchedKeyword: x.matchedKeyword, total: x.total },
           availableAccounts: sharedAccounts,
           apiKey: sharedApiKey,
           model: sharedModel
         })
       });
       const data = await res.json();
-
       if (res.status === 429) {
         const secs = data.retryAfter || 30;
-        setRowAiState(prev => ({
-          ...prev,
-          [rowKey]: { loading: false, result: null, error: `Rate limited. Retry in ${secs}s`, countdown: secs }
-        }));
-        // Countdown timer
+        setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: null, error: `Rate limited. Retry in ${secs}s`, countdown: secs } }));
         let rem = secs;
         const iv = setInterval(() => {
           rem -= 1;
-          if (rem <= 0) {
-            clearInterval(iv);
-            setRowAiState(prev => ({
-              ...prev,
-              [rowKey]: { loading: false, result: null, error: null, countdown: 0 }
-            }));
-          } else {
-            setRowAiState(prev => ({
-              ...prev,
-              [rowKey]: { ...prev[rowKey], countdown: rem, error: `Retry in ${rem}s` }
-            }));
-          }
+          if (rem <= 0) { clearInterval(iv); setRowAiState(prev => ({ ...prev, [rowKey]: { loading: false, result: null, error: null, countdown: 0 } })); }
+          else { setRowAiState(prev => ({ ...prev, [rowKey]: { ...prev[rowKey], countdown: rem, error: `Retry in ${rem}s` } })); }
         }, 1000);
         return;
       }
-
       if (!res.ok || data.error) throw new Error(data.error || "AI error");
-
       const resObj = data.result || {};
       const status = resObj.classification_status || "";
-      // Item is misclassified when AI says current account is wrong
       const isMis = status === "CURRENT_INCORRECT" || status === "BOTH_INCORRECT";
-      // AI-confirmed account: prefer ai_final_account_head, fallback to rule engine suggestion
       const aiAccount = resObj.ai_final_account_head || "";
-
       setRowAiState(prev => ({
         ...prev,
         [rowKey]: {
@@ -571,17 +562,10 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
           countdown: 0
         }
       }));
-
       if (isMis && aiAccount) {
         setAiResults(prev => {
           const existing = prev.findIndex(r => r.item === x.item && r.vendor === x.vendor);
-          const entry = {
-            ...x,
-            isAi: true,
-            suggestedAccount: aiAccount,
-            matchedKeyword: resObj.ai_reason || "AI Verified",
-            reason: resObj.ai_reason || x.reason
-          };
+          const entry = { ...x, isAi: true, suggestedAccount: aiAccount, matchedKeyword: resObj.ai_reason || "AI Verified", reason: resObj.ai_reason || x.reason };
           if (existing >= 0) { const next = [...prev]; next[existing] = entry; return next; }
           return [...prev, entry];
         });
@@ -591,13 +575,31 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
     }
   };
 
-  // Combine local and AI results
+  const saveToKnowledge = async (x) => {
+    if (!clientId) { alert("No client selected. Select a client to save to Knowledge Base."); return; }
+    const rowKey = `${x.item}:::${x.vendor}`;
+    const finalAccount = rowAiState[rowKey]?.result?.suggestedAccount || x.suggestedAccount;
+    setSavingRows(prev => new Set([...prev, rowKey]));
+    try {
+      const res = await fetch("/api/knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: clientId, item_name_raw: x.item, account_head: finalAccount, source: "human_approved", notes: `Approved from audit` })
+      });
+      if (!res.ok) throw new Error("Failed to save");
+      setSavedRows(prev => new Set([...prev, rowKey]));
+      onSaveToKnowledge && onSaveToKnowledge({ item: x.item, account: finalAccount });
+    } catch (e) {
+      alert(`Save failed: ${e.message}`);
+    } finally {
+      setSavingRows(prev => { const n = new Set(prev); n.delete(rowKey); return n; });
+    }
+  };
+
   const combinedItems = useMemo(() => {
     const map = new Map();
-    items.forEach(it => map.set(it.item, { ...it, source: "Rule Engine" }));
-    aiResults.forEach(it => {
-      map.set(it.item, { ...it, source: "AI Web Search" });
-    });
+    items.forEach(it => map.set(it.item, { ...it }));
+    aiResults.forEach(it => { map.set(it.item, { ...it, isAi: true }); });
     return [...map.values()].sort((a, b) => b.total - a.total);
   }, [items, aiResults]);
 
@@ -609,30 +611,37 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
       x.vendor.toLowerCase().includes(term) ||
       x.actualAccount.toLowerCase().includes(term) ||
       x.suggestedAccount.toLowerCase().includes(term) ||
-      (x.matchedKeyword && x.matchedKeyword.toLowerCase().includes(term)) ||
-      (x.reason && x.reason.toLowerCase().includes(term))
+      (x.matchedKeyword && x.matchedKeyword.toLowerCase().includes(term))
     );
   }, [combinedItems, q]);
 
   const totalExposure = useMemo(() => combinedItems.reduce((s, x) => s + x.total, 0), [combinedItems]);
+  const kbCount = combinedItems.filter(x => x.knowledgeMatch).length;
+  const ruleCount = combinedItems.filter(x => !x.knowledgeMatch).length;
 
   return (
     <section className="panel">
       <div className="panelhead">
         <div>
-          <p className="eyebrow">RESTAURANT AUDIT — RULE ENGINE + AI LAYER</p>
+          <p className="eyebrow">KNOWLEDGE-FIRST AUDIT ENGINE</p>
           <h2>Account Head Misclassifications</h2>
         </div>
         <div className="pivot-summary-badges">
           <b className="badge">{combinedItems.length} Flagged Items</b>
+          {kbCount > 0 && <b className="badge" style={{ background: "#dbeafe", color: "#1d4ed8", border: "1px solid #bfdbfe" }}>📚 {kbCount} Knowledge Base</b>}
+          {ruleCount > 0 && <b className="badge" style={{ background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a" }}>🔬 {ruleCount} Rule Engine</b>}
           <b className="badge accent-badge">{show(totalExposure)} Total Exposure</b>
         </div>
       </div>
 
       <div className="misclass-info-banner">
-        <span>🔬</span>
+        <span>{clientId ? "📚" : "🔬"}</span>
         <div style={{ flex: 1 }}>
-          <strong>Dual-Layer Audit:</strong> Rule engine flags instantly. Click <strong>🤖 Ask AI</strong> for AI second-opinion — uses <strong>llama-3.1-8b-instant</strong> (fast) and auto-escalates to <strong>llama-3.3-70b-versatile</strong> (shown as 70B↑) when confidence is below 75% or review is needed.
+          {clientId ? (
+            <><strong>Knowledge-First Audit:</strong> Items matched from client Knowledge Base are flagged with 📚. Unknown items use <strong>Rule Engine</strong>, then <strong>🤖 AI</strong>. Save approved corrections to KB with 💾.</>
+          ) : (
+            <><strong>Rule Engine Only:</strong> No client selected. Select a client with an initialized Knowledge Base to enable knowledge-first classification.</>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="pivot-btn" onClick={onOpenSetup}>⚙️ AI Config</button>
@@ -643,24 +652,19 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
       <div className="pivot-toolbar">
         <div className="pivot-search-wrap">
           <span>🔍</span>
-          <input
-            type="text"
-            className="pivot-search"
-            placeholder="Search flagged item, vendor, or account..."
-            value={q}
-            onChange={e => setQ(e.target.value)}
-          />
+          <input type="text" className="pivot-search" placeholder="Search flagged item, vendor, or account..." value={q} onChange={e => setQ(e.target.value)} />
           {q && <button className="pivot-clear-btn" onClick={() => setQ("")}>✕</button>}
         </div>
       </div>
 
-      <Table head={["Item Description", "Vendor", "Current Account Head", "AI Final Account", "Detection / AI Reason", "Amount", "AI Check"]}>
+      <Table head={["Item Description", "Vendor", "Current Account Head", "Correct Account Head", "Source / Reason", "Amount", "Actions"]}>
         {filtered.length ? filtered.map((x, i) => {
           const rowKey = `${x.item}:::${x.vendor}`;
           const rowAi = rowAiState[rowKey];
           const ai = rowAi?.result;
+          const isSaved = savedRows.has(rowKey);
+          const isSaving = savingRows.has(rowKey);
 
-          // Chip color by classification_status
           const statusColors = {
             CURRENT_CORRECT: { bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
             BOTH_CORRECT:    { bg: "#dcfce7", color: "#15803d", border: "#bbf7d0" },
@@ -675,54 +679,36 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
           return (
             <tr key={i}>
               <td>
-                <div style={{ fontWeight: 600, color: "var(--ink)" }}>{x.item}</div>
-                {/* Rule engine detection reason (before AI runs) */}
+                <div style={{ fontWeight: 600, color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }}>
+                  {x.knowledgeMatch && <span title="Flagged by Knowledge Base" style={{ fontSize: 13 }}>📚</span>}
+                  {x.item}
+                </div>
                 {!ai && x.reason && <small style={{ color: "var(--muted)", display: "block", marginTop: "3px", fontSize: "11px" }}>{x.reason}</small>}
-                {/* AI classification status chip + confidence */}
                 {ai?.classificationStatus && sc && (
-                  <span style={{
-                    display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5,
-                    padding: "2px 7px", borderRadius: 12, fontSize: "10.5px", fontWeight: 700,
-                    background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, letterSpacing: "0.02em"
-                  }}>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4, marginTop: 5, padding: "2px 7px", borderRadius: 12, fontSize: "10.5px", fontWeight: 700, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}`, letterSpacing: "0.02em" }}>
                     {ai.classificationStatus.replace(/_/g, " ")}
                     {ai.confidence != null && ` · ${ai.confidence}%`}
-                    {ai.escalated && <span title="Escalated to llama-3.3-70b-versatile for higher confidence" style={{ marginLeft: 3, fontSize: "9px", opacity: 0.8 }}>70B↑</span>}
+                    {ai.escalated && <span title="Escalated to 70B" style={{ marginLeft: 3, fontSize: "9px", opacity: 0.8 }}>70B↑</span>}
                   </span>
                 )}
-                {/* Error / rate limit */}
-                {rowAi?.error && (
-                  <small style={{ color: rowAi.countdown > 0 ? "#b45309" : "#dc2626", display: "block", marginTop: "3px", fontSize: "11px" }}>
-                    {rowAi.countdown > 0 ? `⏳ ${rowAi.error}` : `⚠ ${rowAi.error}`}
-                  </small>
-                )}
+                {rowAi?.error && <small style={{ color: rowAi.countdown > 0 ? "#b45309" : "#dc2626", display: "block", marginTop: "3px", fontSize: "11px" }}>{rowAi.countdown > 0 ? `⏳ ${rowAi.error}` : `⚠ ${rowAi.error}`}</small>}
               </td>
 
               <td>{x.vendor}</td>
 
-              {/* Current Account + AI verdict on it */}
               <td>
                 <span className="pill-actual-acc">{x.actualAccount}</span>
-                {ai?.currentVerdict === "CORRECT" && (
-                  <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#16a34a", fontWeight: 700 }}>✓ Correct</span>
-                )}
-                {ai?.currentVerdict === "INCORRECT" && (
-                  <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>✗ Incorrect</span>
-                )}
-                {ai?.currentVerdict === "UNCERTAIN" && (
-                  <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#d97706", fontWeight: 700 }}>? Uncertain</span>
-                )}
+                {ai?.currentVerdict === "CORRECT" && <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#16a34a", fontWeight: 700 }}>✓ Correct</span>}
+                {ai?.currentVerdict === "INCORRECT" && <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>✗ Incorrect</span>}
+                {ai?.currentVerdict === "UNCERTAIN" && <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#d97706", fontWeight: 700 }}>? Uncertain</span>}
               </td>
 
-              {/* AI final account head (overrides rule engine suggestion when AI has responded) */}
               <td>
                 {ai?.classificationStatus ? (
                   ai.isMisclassified && ai.suggestedAccount ? (
                     <>
                       <span className="pill-suggested-acc">🤖 {ai.suggestedAccount}</span>
-                      {ai.suggestedVerdict === "CORRECT" && (
-                        <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#1d4ed8", fontWeight: 700 }}>✓ AI Confirmed</span>
-                      )}
+                      {ai.suggestedVerdict === "CORRECT" && <span style={{ display: "block", marginTop: 3, fontSize: "10px", color: "#1d4ed8", fontWeight: 700 }}>✓ AI Confirmed</span>}
                     </>
                   ) : ai.reviewRequired ? (
                     <span style={{ fontSize: "11px", color: "#92400e", fontWeight: 600 }}>⚠ Review required</span>
@@ -730,16 +716,19 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
                     <span style={{ fontSize: "11px", color: "#15803d", fontWeight: 600 }}>✅ Correctly booked</span>
                   )
                 ) : (
-                  <span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span>
+                  x.knowledgeMatch
+                    ? <span className="pill-suggested-acc" style={{ background: "#dbeafe", borderColor: "#bfdbfe", color: "#1e40af" }}>📚 {x.suggestedAccount}</span>
+                    : <span className="pill-suggested-acc">&rarr; {x.suggestedAccount}</span>
                 )}
               </td>
 
-              {/* Detection reason or AI explanation */}
               <td>
                 {ai?.why ? (
                   <span className="pill-ai-badge">🤖 {ai.why}</span>
                 ) : ai?.reviewNote ? (
                   <span className="pill-ai-badge" style={{ background: "#fef9c3", color: "#92400e", border: "1px solid #fde68a" }}>⚠ {ai.reviewNote}</span>
+                ) : x.knowledgeMatch ? (
+                  <span className="pill-ai-badge" style={{ background: "#dbeafe", color: "#1e40af", border: "1px solid #bfdbfe" }}>📚 Knowledge Base</span>
                 ) : x.isAi ? (
                   <span className="pill-ai-badge">🤖 {x.matchedKeyword}</span>
                 ) : (
@@ -750,27 +739,34 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
               <td style={{ fontWeight: 700, fontFamily: "var(--font-mono, monospace)", whiteSpace: "nowrap" }}>{show(x.total)}</td>
 
               <td>
-                <button
-                  className={`ask-ai-row-btn ${rowAi?.countdown > 0 ? "rate-limited" : ""}`}
-                  onClick={() => askAiForRow(x)}
-                  disabled={rowAi?.loading || rowAi?.countdown > 0}
-                  title={
-                    rowAi?.countdown > 0
-                      ? `Rate limited, retry in ${rowAi.countdown}s`
-                      : ai?.escalated
-                      ? `Checked by llama-3.3-70b-versatile (escalated)`
-                      : `AI second opinion (8B → 70B auto-escalate)`
-                  }
-                >
-                  {rowAi?.loading ? "..." : rowAi?.countdown > 0 ? `${rowAi.countdown}s` : ai ? "🔄" : "🤖"}
-                </button>
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  <button
+                    className={`ask-ai-row-btn ${rowAi?.countdown > 0 ? "rate-limited" : ""}`}
+                    onClick={() => askAiForRow(x)}
+                    disabled={rowAi?.loading || rowAi?.countdown > 0}
+                    title={rowAi?.countdown > 0 ? `Rate limited, retry in ${rowAi.countdown}s` : "AI second opinion"}
+                  >
+                    {rowAi?.loading ? "..." : rowAi?.countdown > 0 ? `${rowAi.countdown}s` : ai ? "🔄" : "🤖"}
+                  </button>
+                  {clientId && (
+                    <button
+                      className="ask-ai-row-btn"
+                      onClick={() => saveToKnowledge(x)}
+                      disabled={isSaved || isSaving}
+                      title={isSaved ? "Saved to Knowledge Base" : "Save approved classification to Knowledge Base"}
+                      style={{ background: isSaved ? "#dcfce7" : undefined, color: isSaved ? "#15803d" : undefined, fontSize: 11 }}
+                    >
+                      {isSaving ? "…" : isSaved ? "✓ Saved" : "💾 Save"}
+                    </button>
+                  )}
+                </div>
               </td>
             </tr>
           );
         }) : (
           <tr>
             <td colSpan="7">
-              <Empty>{combinedItems.length === 0 ? "🎉 No misclassifications detected by rule engine! Use 🤖 Ask AI buttons on any item to double-check with AI." : "No items match your search."}</Empty>
+              <Empty>{combinedItems.length === 0 ? "🎉 No misclassifications detected! Use 🤖 Ask AI on any item for a second opinion." : "No items match your search."}</Empty>
             </td>
           </tr>
         )}
@@ -779,6 +775,7 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
   );
 }
 
+// ─── ACCOUNT PIVOT ───────────────────────────────────────────────────────────
 function AccountPivot({ current }) {
   const [expandedAccs, setExpandedAccs] = useState(() => new Set());
   const [expandedVendors, setExpandedVendors] = useState(() => new Set());
@@ -789,103 +786,47 @@ function AccountPivot({ current }) {
     const accMap = new Map();
     let totalSpend = 0;
     const allVendors = new Set();
-
     current.records.forEach(r => {
       totalSpend += r.total;
       allVendors.add(r.vendor);
-      if (!accMap.has(r.account)) {
-        accMap.set(r.account, new Map());
-      }
+      if (!accMap.has(r.account)) accMap.set(r.account, new Map());
       const vMap = accMap.get(r.account);
-      if (!vMap.has(r.vendor)) {
-        vMap.set(r.vendor, []);
-      }
+      if (!vMap.has(r.vendor)) vMap.set(r.vendor, []);
       vMap.get(r.vendor).push(r);
     });
-
     const q = query.trim().toLowerCase();
     const tree = [];
-
     accMap.forEach((vendorMap, accName) => {
       const vendors = [];
       let accSpend = 0;
-
       vendorMap.forEach((items, vName) => {
         const vSpend = items.reduce((s, r) => s + r.total, 0);
         accSpend += vSpend;
-
         const itemMap = new Map();
         items.forEach(it => {
           const key = it.item || "(No Item Name)";
-          if (!itemMap.has(key)) {
-            itemMap.set(key, { name: key, qty: 0, total: 0, rates: [] });
-          }
+          if (!itemMap.has(key)) itemMap.set(key, { name: key, qty: 0, total: 0, rates: [] });
           const entry = itemMap.get(key);
           entry.qty += it.qty;
           entry.total += it.total;
           if (it.rate > 0) entry.rates.push(it.rate);
         });
-
-        const consolidatedItems = [...itemMap.values()].map(it => ({
-          name: it.name,
-          qty: it.qty,
-          total: it.total,
-          rate: it.rates.length ? (it.total / (it.qty || 1)) : 0
-        })).sort((a, b) => b.total - a.total);
-
-        const matchesQuery = !q ||
-          accName.toLowerCase().includes(q) ||
-          vName.toLowerCase().includes(q) ||
-          consolidatedItems.some(it => it.name.toLowerCase().includes(q));
-
-        if (matchesQuery) {
-          vendors.push({ name: vName, spend: vSpend, items: consolidatedItems });
-        }
+        const consolidatedItems = [...itemMap.values()].map(it => ({ name: it.name, qty: it.qty, total: it.total, rate: it.rates.length ? (it.total / (it.qty || 1)) : 0 })).sort((a, b) => b.total - a.total);
+        const matchesQuery = !q || accName.toLowerCase().includes(q) || vName.toLowerCase().includes(q) || consolidatedItems.some(it => it.name.toLowerCase().includes(q));
+        if (matchesQuery) vendors.push({ name: vName, spend: vSpend, items: consolidatedItems });
       });
-
-      if (vendors.length > 0) {
-        vendors.sort((a, b) => b.spend - a.spend);
-        tree.push({ name: accName, spend: accSpend, vendors });
-      }
+      if (vendors.length > 0) { vendors.sort((a, b) => b.spend - a.spend); tree.push({ name: accName, spend: accSpend, vendors }); }
     });
-
     tree.sort((a, b) => b.spend - a.spend);
     return { tree, totalSpend, accCount: accMap.size, vendorCount: allVendors.size };
   }, [current, query]);
 
   const allAccKeys = useMemo(() => pivotData.tree.map(a => a.name), [pivotData.tree]);
-  const allVendorKeys = useMemo(() => {
-    const keys = [];
-    pivotData.tree.forEach(a => a.vendors.forEach(v => keys.push(`${a.name}:::${v.name}`)));
-    return keys;
-  }, [pivotData.tree]);
-
-  const toggleAcc = (name) => {
-    setExpandedAccs(prev => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name); else next.add(name);
-      return next;
-    });
-  };
-
-  const toggleVendor = (key) => {
-    setExpandedVendors(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      return next;
-    });
-  };
-
-  const expandAll = () => {
-    setExpandedAccs(new Set(allAccKeys));
-    setExpandedVendors(new Set(allVendorKeys));
-  };
-
-  const collapseAll = () => {
-    setExpandedAccs(new Set());
-    setExpandedVendors(new Set());
-  };
-
+  const allVendorKeys = useMemo(() => { const keys = []; pivotData.tree.forEach(a => a.vendors.forEach(v => keys.push(`${a.name}:::${v.name}`))); return keys; }, [pivotData.tree]);
+  const toggleAcc = (name) => setExpandedAccs(prev => { const next = new Set(prev); if (next.has(name)) next.delete(name); else next.add(name); return next; });
+  const toggleVendor = (key) => setExpandedVendors(prev => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
+  const expandAll = () => { setExpandedAccs(new Set(allAccKeys)); setExpandedVendors(new Set(allVendorKeys)); };
+  const collapseAll = () => { setExpandedAccs(new Set()); setExpandedVendors(new Set()); };
   const isSearching = query.trim().length > 0;
   const isAccOpen = (name) => isSearching || expandedAccs.has(name);
   const isVendorOpen = (key) => isSearching || expandedVendors.has(key);
@@ -893,37 +834,23 @@ function AccountPivot({ current }) {
   return (
     <section className="panel">
       <div className="panelhead">
-        <div>
-          <p className="eyebrow">CURRENT MONTH P&L HIERARCHY</p>
-          <h2>Account Heads Breakdown</h2>
-        </div>
+        <div><p className="eyebrow">CURRENT MONTH P&L HIERARCHY</p><h2>Account Heads Breakdown</h2></div>
         <div className="pivot-summary-badges">
           <b className="badge">{pivotData.accCount} Account Heads</b>
           <b className="badge">{pivotData.vendorCount} Vendors</b>
           <b className="badge accent-badge">{show(pivotData.totalSpend)} Total</b>
         </div>
       </div>
-
       {!current?.hasAccountCol && (
         <div className="pivot-warning">
           <span>ℹ️</span>
-          <div>
-            <strong>No "Account" column found in export</strong>
-            <small>All items are grouped under "Unassigned Account". Include an "Account Name" or "Expense Account" column in your Zoho export for full P&L categorization.</small>
-          </div>
+          <div><strong>No "Account" column found in export</strong><small>All items are grouped under "Unassigned Account". Include an "Account Name" or "Expense Account" column in your Zoho export for full P&L categorization.</small></div>
         </div>
       )}
-
       <div className="pivot-toolbar">
         <div className="pivot-search-wrap">
           <span>🔍</span>
-          <input
-            type="text"
-            className="pivot-search"
-            placeholder="Search account head, vendor, or item..."
-            value={query}
-            onChange={e => setQuery(e.target.value)}
-          />
+          <input type="text" className="pivot-search" placeholder="Search account head, vendor, or item..." value={query} onChange={e => setQuery(e.target.value)} />
           {query && <button className="pivot-clear-btn" onClick={() => setQuery("")}>✕</button>}
         </div>
         <div className="pivot-actions">
@@ -931,7 +858,6 @@ function AccountPivot({ current }) {
           <button className="pivot-btn" onClick={collapseAll}>Collapse all</button>
         </div>
       </div>
-
       <div className="pivot-tree">
         {pivotData.tree.length === 0 ? (
           <Empty>No accounts match your search.</Empty>
@@ -952,7 +878,6 @@ function AccountPivot({ current }) {
                     <b className="pivot-acc-spend">{show(acc.spend)}</b>
                   </div>
                 </div>
-
                 {accOpen && (
                   <div className="pivot-vendors-list">
                     {acc.vendors.map(v => {
@@ -966,37 +891,19 @@ function AccountPivot({ current }) {
                               <strong className="pivot-vendor-title">{v.name}</strong>
                               <span className="pivot-count-pill sub">{v.items.length} {v.items.length === 1 ? "item" : "items"}</span>
                             </div>
-                            <div className="pivot-right">
-                              <b className="pivot-vendor-spend">{show(v.spend)}</b>
-                            </div>
+                            <div className="pivot-right"><b className="pivot-vendor-spend">{show(v.spend)}</b></div>
                           </div>
-
                           {vOpen && (
                             <div className="pivot-items-table">
                               <table>
-                                <thead>
-                                  <tr>
-                                    <th>Item Description</th>
-                                    <th style={{ textAlign: "right" }}>Quantity</th>
-                                    <th style={{ textAlign: "right" }}>Avg Rate</th>
-                                    <th style={{ textAlign: "right" }}>Total Amount</th>
-                                  </tr>
-                                </thead>
+                                <thead><tr><th>Item Description</th><th style={{ textAlign: "right" }}>Quantity</th><th style={{ textAlign: "right" }}>Avg Rate</th><th style={{ textAlign: "right" }}>Total Amount</th></tr></thead>
                                 <tbody>
                                   {v.items.map((it, idx) => (
                                     <tr key={idx}>
-                                      <td className="pivot-item-name">
-                                        <span className="bullet">•</span> {it.name}
-                                      </td>
-                                      <td style={{ textAlign: "right", fontFamily: "var(--font-mono, monospace)" }}>
-                                        {it.qty > 0 ? it.qty.toLocaleString("en-IN") : "-"}
-                                      </td>
-                                      <td style={{ textAlign: "right", fontFamily: "var(--font-mono, monospace)" }}>
-                                        {it.rate > 0 ? show(it.rate) : "-"}
-                                      </td>
-                                      <td style={{ textAlign: "right", fontWeight: "600", fontFamily: "var(--font-mono, monospace)" }}>
-                                        {show(it.total)}
-                                      </td>
+                                      <td className="pivot-item-name"><span className="bullet">•</span> {it.name}</td>
+                                      <td style={{ textAlign: "right", fontFamily: "var(--font-mono, monospace)" }}>{it.qty > 0 ? it.qty.toLocaleString("en-IN") : "-"}</td>
+                                      <td style={{ textAlign: "right", fontFamily: "var(--font-mono, monospace)" }}>{it.rate > 0 ? show(it.rate) : "-"}</td>
+                                      <td style={{ textAlign: "right", fontWeight: "600", fontFamily: "var(--font-mono, monospace)" }}>{show(it.total)}</td>
                                     </tr>
                                   ))}
                                 </tbody>
@@ -1017,7 +924,8 @@ function AccountPivot({ current }) {
   );
 }
 
-// ─── DATA PREVIEW COMPONENT ─────────────────────────────────────────────────
+// ─── DATA PREVIEW ────────────────────────────────────────────────────────────
+// ─── DATA PREVIEW ────────────────────────────────────────────────────────────
 function DataPreview({ data }) {
   if (!data) return null;
   const { name, records, colMap } = data;
@@ -1027,10 +935,7 @@ function DataPreview({ data }) {
   return (
     <section className="panel" style={{ marginTop: 0 }}>
       <div className="panelhead">
-        <div>
-          <p className="eyebrow">DATA VERIFICATION</p>
-          <h2>Parsed File Preview — {name}</h2>
-        </div>
+        <div><p className="eyebrow">DATA VERIFICATION</p><h2>Parsed File Preview — {name}</h2></div>
         <div className="pivot-summary-badges">
           <b className="badge">{records.length} rows parsed</b>
           {blankAccount > 0 && <b className="badge" style={{ background: "#fef3c7", color: "#92400e" }}>⚠ {blankAccount} rows missing Account</b>}
@@ -1040,9 +945,7 @@ function DataPreview({ data }) {
       {colMap && (
         <div className="col-map-bar">
           {Object.entries(colMap).filter(([, v]) => v !== null).map(([k, v]) => (
-            <span key={k} className="col-map-tag">
-              <strong>{k}</strong> → Col {v}
-            </span>
+            <span key={k} className="col-map-tag"><strong>{k}</strong> → Col {v}</span>
           ))}
         </div>
       )}
@@ -1050,15 +953,10 @@ function DataPreview({ data }) {
         <table>
           <thead>
             <tr>
-              <th>#</th>
-              <th>Date</th>
-              <th>Vendor</th>
-              <th>Bill No.</th>
+              <th>#</th><th>Date</th><th>Vendor</th><th>Bill No.</th>
               <th style={{ background: blankAccount > 0 ? "#fef9c3" : undefined }}>Account Head</th>
               <th style={{ background: blankItem > 0 ? "#fef9c3" : undefined }}>Item Name</th>
-              <th>Qty</th>
-              <th>Rate</th>
-              <th>Total</th>
+              <th>Qty</th><th>Rate</th><th>Total</th>
             </tr>
           </thead>
           <tbody>
@@ -1068,12 +966,8 @@ function DataPreview({ data }) {
                 <td>{r.date}</td>
                 <td style={{ fontWeight: 500 }}>{r.vendor}</td>
                 <td style={{ color: "var(--muted)" }}>{r.bill || "-"}</td>
-                <td style={{ background: (!r.account || r.account === "Unassigned Account") ? "#fef3c7" : undefined }}>
-                  {r.account || <em style={{ color: "#ef4444" }}>Missing</em>}
-                </td>
-                <td style={{ background: !r.item ? "#fef3c7" : undefined }}>
-                  {r.item || <em style={{ color: "#ef4444" }}>Missing</em>}
-                </td>
+                <td style={{ background: (!r.account || r.account === "Unassigned Account") ? "#fef3c7" : undefined }}>{r.account || <em style={{ color: "#ef4444" }}>Missing</em>}</td>
+                <td style={{ background: !r.item ? "#fef3c7" : undefined }}>{r.item || <em style={{ color: "#ef4444" }}>Missing</em>}</td>
                 <td>{r.qty || "-"}</td>
                 <td>{r.rate ? show(r.rate) : "-"}</td>
                 <td style={{ fontWeight: 600 }}>{r.total ? show(r.total) : "-"}</td>
@@ -1082,14 +976,14 @@ function DataPreview({ data }) {
           </tbody>
         </table>
       </div>
-      {records.length > 20 && <p style={{ padding: "8px 16px", color: "var(--muted)", fontSize: 12 }}>Showing first 20 of {records.length} rows. Scroll to Audit tabs for full analysis.</p>}
+      {records.length > 20 && <p style={{ padding: "8px 16px", color: "var(--muted)", fontSize: 12 }}>Showing first 20 of {records.length} rows.</p>}
     </section>
   );
 }
 
-// ─── AI SETUP MODAL (Single-source Verification) ───────────────────────────
+// ─── AI SETUP MODAL ──────────────────────────────────────────────────────────
 function AiSetupModal({ isOpen, onClose, apiKey, aiConfig, onSave }) {
-  const [step, setStep] = useState("key"); // "key" | "model" | "testing" | "configured"
+  const [step, setStep] = useState("key");
   const [keyInput, setKeyInput] = useState(apiKey || "");
   const [selectedModel, setSelectedModel] = useState(aiConfig?.model || "");
   const [availableModels, setAvailableModels] = useState([]);
@@ -1099,25 +993,17 @@ function AiSetupModal({ isOpen, onClose, apiKey, aiConfig, onSave }) {
   useEffect(() => {
     setKeyInput(apiKey || "");
     setSelectedModel(aiConfig?.model || "");
-    if (apiKey && aiConfig?.verified) {
-      setStep("configured");
-    } else {
-      setStep("key");
-    }
+    if (apiKey && aiConfig?.verified) setStep("configured");
+    else setStep("key");
     setError("");
   }, [isOpen, apiKey, aiConfig]);
 
   const fetchModels = async (overrideKey) => {
     const key = overrideKey || keyInput.trim();
     if (!key) { setError("Please enter your Groq API key (starts with gsk_...)"); return; }
-    setError("");
-    setLoading(true);
+    setError(""); setLoading(true);
     try {
-      const res = await fetch("/api/ai-config/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: key })
-      });
+      const res = await fetch("/api/ai-config/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: key }) });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Failed to validate key with Groq");
       const models = data.availableModels || [];
@@ -1126,122 +1012,62 @@ function AiSetupModal({ isOpen, onClose, apiKey, aiConfig, onSave }) {
       const choice = (aiConfig?.model && models.includes(aiConfig.model)) ? aiConfig.model : (data.model || models[0]);
       setSelectedModel(choice);
       setStep("model");
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
   };
 
   const testAndSave = async () => {
     if (!selectedModel) { setError("Please choose a model"); return; }
-    setLoading(true);
-    setError("");
-    setStep("testing");
+    setLoading(true); setError(""); setStep("testing");
     try {
-      const res = await fetch("/api/ai-config/test", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          apiKey: keyInput.trim(),
-          model: selectedModel
-        })
-      });
+      const res = await fetch("/api/ai-config/test", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: keyInput.trim(), model: selectedModel }) });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "Model verification failed");
-      
       onSave(keyInput.trim(), data.config);
       setStep("configured");
-    } catch (e) {
-      setError(e.message);
-      setStep("model");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setError(e.message); setStep("model"); } finally { setLoading(false); }
   };
 
   if (!isOpen) return null;
-
   return (
     <div className="setup-overlay">
       <div className="setup-modal">
         <div className="setup-modal-header">
-          <strong>⚙️ AI Setup & Configuration</strong>
+          <strong>⚙️ AI Setup &amp; Configuration</strong>
           <button className="setup-close-btn" onClick={onClose}>✕</button>
         </div>
-
         <div className="setup-body">
           {step === "key" && (
             <>
               <p className="setup-desc">
-                {aiConfig?.verified && !apiKey ? (
-                  <span style={{ color: "#d97706", fontWeight: 600, display: "block", marginBottom: 6 }}>
-                    🔑 Session Expired: Please enter your Groq API key to activate AI for this session.
-                  </span>
-                ) : (
-                  <>Paste your free Groq API key. If you need one, create it for free at <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>.</>
-                )}
+                {aiConfig?.verified && !apiKey ? <span style={{ color: "#d97706", fontWeight: 600, display: "block", marginBottom: 6 }}>🔑 Session Expired: Please enter your Groq API key to activate AI for this session.</span> : <>Paste your free Groq API key from <a href="https://console.groq.com/keys" target="_blank" rel="noreferrer">console.groq.com/keys</a>.</>}
               </p>
               <label className="setup-label">Groq API Key</label>
-              <input
-                type="password"
-                className="setup-input"
-                placeholder="gsk_..."
-                value={keyInput}
-                onChange={e => setKeyInput(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && fetchModels()}
-              />
+              <input type="password" className="setup-input" placeholder="gsk_..." value={keyInput} onChange={e => setKeyInput(e.target.value)} onKeyDown={e => e.key === "Enter" && fetchModels()} />
               {error && <div className="setup-error"><span>⚠</span> {error}</div>}
               <div className="setup-actions">
                 <button className="btn-cancel" onClick={onClose}>Cancel</button>
-                <button className="btn-save" onClick={() => fetchModels()} disabled={loading || !keyInput.trim()}>
-                  {loading ? "Verifying Key..." : "Next: Choose Model →"}
-                </button>
+                <button className="btn-save" onClick={() => fetchModels()} disabled={loading || !keyInput.trim()}>{loading ? "Verifying Key..." : "Next: Choose Model →"}</button>
               </div>
             </>
           )}
-
           {step === "model" && (
             <>
-              <p className="setup-desc">
-                Choose the model from your active Groq account to use for audit reviews and chat:
-              </p>
+              <p className="setup-desc">Choose the model from your active Groq account:</p>
               <label className="setup-label">Available Models for your Key</label>
-              <select
-                className="setup-select"
-                value={selectedModel}
-                onChange={e => setSelectedModel(e.target.value)}
-              >
-                {availableModels.map(m => (
-                  <option key={m} value={m}>
-                    {m} {m.includes("instant") ? "⚡ (Recommended — Fast & High Quota)" : m.includes("70b") ? "🧠 (Deep Accuracy)" : ""}
-                  </option>
-                ))}
+              <select className="setup-select" value={selectedModel} onChange={e => setSelectedModel(e.target.value)}>
+                {availableModels.map(m => <option key={m} value={m}>{m} {m.includes("instant") ? "⚡ (Recommended)" : m.includes("70b") ? "🧠 (Deep Accuracy)" : ""}</option>)}
               </select>
-
-              <div className="model-info-box">
-                <strong>Tip for Free Tier</strong>
-                <code>llama-3.1-8b-instant</code> offers the best balance of speed and high free tokens-per-minute limits.
-              </div>
-
+              <div className="model-info-box"><strong>Tip for Free Tier</strong> <code>llama-3.1-8b-instant</code> offers the best balance of speed and high free tokens-per-minute limits.</div>
               {error && <div className="setup-error"><span>⚠</span> {error}</div>}
-
               <div className="setup-actions">
                 <button className="btn-cancel" onClick={() => setStep("key")}>← Change Key</button>
-                <button className="btn-save" onClick={testAndSave} disabled={loading || !selectedModel}>
-                  {loading ? "Verifying..." : "Test & Save Config →"}
-                </button>
+                <button className="btn-save" onClick={testAndSave} disabled={loading || !selectedModel}>{loading ? "Verifying..." : "Test & Save Config →"}</button>
               </div>
             </>
           )}
-
           {step === "testing" && (
-            <div className="setup-testing">
-              <span className="setup-spinner">⚙️</span>
-              <p>Performing live connection test with <strong>{selectedModel}</strong>...</p>
-            </div>
+            <div className="setup-testing"><span className="setup-spinner">⚙️</span><p>Performing live connection test with <strong>{selectedModel}</strong>...</p></div>
           )}
-
           {step === "configured" && (
             <div className="setup-success">
               <span className="setup-success-icon">✅</span>
@@ -1267,55 +1093,28 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
   const [chatCountdown, setChatCountdown] = useState(0);
-  const messagesEndRef = typeof window !== "undefined" ? { current: null } : null;
 
   const sendMessage = async () => {
     const msg = input.trim();
     if (!msg || loading || chatCountdown > 0) return;
-    if (!apiKey || !model) {
-      onOpenSetup();
-      return;
-    }
-
+    if (!apiKey || !model) { onOpenSetup(); return; }
     const newHistory = [...history, { role: "user", content: msg }];
-    setHistory(newHistory);
-    setInput("");
-    setLoading(true);
-
+    setHistory(newHistory); setInput(""); setLoading(true);
     try {
-      const res = await fetch("/api/ai-chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: msg,
-          history: history.slice(-4),
-          availableAccounts,
-          apiKey,
-          model
-        })
-      });
+      const res = await fetch("/api/ai-chat", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: msg, history: history.slice(-4), availableAccounts, apiKey, model }) });
       const data = await res.json();
-
       if (res.status === 429) {
         const secs = data.retryAfter || 30;
         setChatCountdown(secs);
         setHistory([...newHistory, { role: "assistant", content: `⏳ Rate limit reached. Please wait ${secs}s before asking again.` }]);
         let rem = secs;
-        const iv = setInterval(() => {
-          rem -= 1;
-          if (rem <= 0) { clearInterval(iv); setChatCountdown(0); }
-          else setChatCountdown(rem);
-        }, 1000);
+        const iv = setInterval(() => { rem -= 1; if (rem <= 0) { clearInterval(iv); setChatCountdown(0); } else setChatCountdown(rem); }, 1000);
         return;
       }
-
       if (data.error) throw new Error(data.error);
       setHistory([...newHistory, { role: "assistant", content: data.reply }]);
-    } catch (e) {
-      setHistory([...newHistory, { role: "assistant", content: `⚠️ Error: ${e.message}` }]);
-    } finally {
-      setLoading(false);
-    }
+    } catch (e) { setHistory([...newHistory, { role: "assistant", content: `⚠️ Error: ${e.message}` }]); }
+    finally { setLoading(false); }
   };
 
   return (
@@ -1324,31 +1123,20 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
         {open ? "✕" : "🤖"}
         {!open && <span className="chat-fab-label">AI Assistant</span>}
       </button>
-
       {open && (
         <div className="chat-panel">
           <div className="chat-panel-header">
-            <div>
-              <strong>🤖 AI Assistant</strong>
-              <small>{model ? `Using ${model}` : "Click ⚙️ to configure Groq"}</small>
-            </div>
+            <div><strong>🤖 AI Assistant</strong><small>{model ? `Using ${model}` : "Click ⚙️ to configure Groq"}</small></div>
             <div style={{ display: "flex", gap: 6 }}>
               <button className="chat-key-btn" onClick={onOpenSetup} title="Configure AI Key & Model">⚙️</button>
               <button className="chat-close-btn" onClick={() => setOpen(false)}>✕</button>
             </div>
           </div>
-
           <div className="chat-messages">
             {history.length === 0 && (
               <div className="chat-empty">
                 <p>👋 Hi! Paste any item name or ask about restaurant accounting.</p>
-                {!apiKey && (
-                  <p style={{ marginTop: 10 }}>
-                    <button className="pivot-btn" onClick={onOpenSetup} style={{ width: "100%", justifyContent: "center" }}>
-                      ⚙️ Setup Groq API Key & Model
-                    </button>
-                  </p>
-                )}
+                {!apiKey && <p style={{ marginTop: 10 }}><button className="pivot-btn" onClick={onOpenSetup} style={{ width: "100%", justifyContent: "center" }}>⚙️ Setup Groq API Key & Model</button></p>}
                 <p style={{ marginTop: 10, fontSize: 12, fontWeight: 600 }}>Try asking:</p>
                 <div className="chat-examples">
                   {["What is VANILLA 4LTR FD 368?", "Is Monin Watermelon a beverage?", "Which account for Classic Connect FTK?"].map(ex => (
@@ -1357,32 +1145,12 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
                 </div>
               </div>
             )}
-            {history.map((m, i) => (
-              <div key={i} className={`chat-msg chat-msg-${m.role}`}>
-                <div className="chat-bubble">{m.content}</div>
-              </div>
-            ))}
-            {loading && (
-              <div className="chat-msg chat-msg-assistant">
-                <div className="chat-bubble chat-typing">⠋ Thinking...</div>
-              </div>
-            )}
-            <div ref={messagesEndRef} />
+            {history.map((m, i) => <div key={i} className={`chat-msg chat-msg-${m.role}`}><div className="chat-bubble">{m.content}</div></div>)}
+            {loading && <div className="chat-msg chat-msg-assistant"><div className="chat-bubble chat-typing">⠋ Thinking...</div></div>}
           </div>
-
           <div className="chat-input-row">
-            <input
-              type="text"
-              className="chat-input"
-              placeholder={chatCountdown > 0 ? `Wait ${chatCountdown}s...` : "Type item name..."}
-              value={input}
-              onChange={e => setInput(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()}
-              disabled={loading || chatCountdown > 0}
-            />
-            <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim() || chatCountdown > 0}>
-              {loading ? "…" : chatCountdown > 0 ? `${chatCountdown}` : "↑"}
-            </button>
+            <input type="text" className="chat-input" placeholder={chatCountdown > 0 ? `Wait ${chatCountdown}s...` : "Type item name..."} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => e.key === "Enter" && !e.shiftKey && sendMessage()} disabled={loading || chatCountdown > 0} />
+            <button className="chat-send-btn" onClick={sendMessage} disabled={loading || !input.trim() || chatCountdown > 0}>{loading ? "…" : chatCountdown > 0 ? `${chatCountdown}` : "↑"}</button>
           </div>
         </div>
       )}
@@ -1390,15 +1158,260 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
   );
 }
 
+// ─── CLIENT MANAGER SCREEN ───────────────────────────────────────────────────
+function ClientManagerScreen({ clients, loading, onSelect, onCreated }) {
+  const [showCreate, setShowCreate] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const createClient = async () => {
+    if (!newName.trim()) return;
+    setCreating(true); setCreateError("");
+    try {
+      const res = await fetch("/api/clients", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: newName.trim() })
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to create client");
+      onCreated(data.client);
+      setNewName(""); setShowCreate(false);
+    } catch (e) { setCreateError(e.message); }
+    finally { setCreating(false); }
+  };
+
+  return (
+    <section className="landing">
+      <p className="eyebrow">CLIENT KNOWLEDGE ENGINE</p>
+      <h2>Select a Client to begin the audit</h2>
+      <p className="lead">Each client has their own persistent Knowledge Base. Select an existing client or create a new one.</p>
+
+      {loading ? (
+        <div style={{ textAlign: "center", padding: "40px 0", color: "var(--muted)" }}>Loading clients...</div>
+      ) : (
+        <>
+          {clients.length === 0 && !showCreate && (
+            <div style={{ textAlign: "center", padding: "32px 0" }}>
+              <p style={{ color: "var(--muted)", marginBottom: 16 }}>No clients yet. Create your first client to get started.</p>
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 16, margin: "24px 0" }}>
+            {clients.map(c => (
+              <button
+                key={c.id}
+                onClick={() => onSelect(c)}
+                style={{
+                  background: "var(--surface)",
+                  border: "1.5px solid var(--border)",
+                  borderRadius: 12,
+                  padding: "20px 24px",
+                  cursor: "pointer",
+                  textAlign: "left",
+                  transition: "all 0.2s",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = "var(--accent)"; e.currentTarget.style.boxShadow = "0 4px 20px rgba(0,0,0,0.12)"; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none"; }}
+              >
+                <div style={{ fontWeight: 700, fontSize: 17, color: "var(--ink)" }}>{c.display_name}</div>
+                <div>
+                  {c.knowledge_initialized ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#dcfce7", color: "#15803d", border: "1px solid #bbf7d0", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
+                      ✅ KB Ready · {c.init_item_count?.toLocaleString("en-IN") || "?"} items
+                    </span>
+                  ) : (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 5, background: "#fef3c7", color: "#92400e", border: "1px solid #fde68a", borderRadius: 20, padding: "3px 10px", fontSize: 12, fontWeight: 700 }}>
+                      ⚠️ Knowledge Not Initialized
+                    </span>
+                  )}
+                </div>
+                {c.initialized_at && (
+                  <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                    Initialized {new Date(c.initialized_at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                  </div>
+                )}
+              </button>
+            ))}
+
+            {showCreate && (
+              <div style={{ background: "var(--surface)", border: "1.5px solid var(--accent)", borderRadius: 12, padding: "20px 24px" }}>
+                <div style={{ fontWeight: 600, marginBottom: 10, color: "var(--ink)" }}>New Client</div>
+                <input
+                  type="text"
+                  placeholder="Client / Restaurant name"
+                  value={newName}
+                  onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && createClient()}
+                  autoFocus
+                  style={{ width: "100%", padding: "8px 12px", border: "1px solid var(--border)", borderRadius: 8, background: "var(--bg)", color: "var(--ink)", fontSize: 14, marginBottom: 8, boxSizing: "border-box" }}
+                />
+                {createError && <div style={{ color: "#dc2626", fontSize: 12, marginBottom: 8 }}>⚠ {createError}</div>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button onClick={() => { setShowCreate(false); setNewName(""); setCreateError(""); }} style={{ flex: 1, padding: "7px 0", borderRadius: 8, border: "1px solid var(--border)", background: "transparent", color: "var(--muted)", cursor: "pointer" }}>Cancel</button>
+                  <button onClick={createClient} disabled={creating || !newName.trim()} style={{ flex: 2, padding: "7px 0", borderRadius: 8, background: "var(--accent)", color: "#fff", border: "none", fontWeight: 600, cursor: "pointer", opacity: (creating || !newName.trim()) ? 0.6 : 1 }}>
+                    {creating ? "Creating..." : "Create Client →"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{ background: "var(--accent)", color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 15, fontWeight: 700, cursor: "pointer", display: showCreate ? "none" : "inline-flex", alignItems: "center", gap: 8 }}
+          >
+            + New Client
+          </button>
+        </>
+      )}
+    </section>
+  );
+}
+
+// ─── KNOWLEDGE INITIALIZER ───────────────────────────────────────────────────
+function KnowledgeInitializer({ client, onInitialized, onBack }) {
+  const [file, setFile] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [error, setError] = useState("");
+  const [result, setResult] = useState(null);
+
+  const handleFile = async (f) => {
+    setFile(f); setError(""); setResult(null);
+    setImporting(true);
+    try {
+      const data = await readFileAsObjects(f);
+      
+      const res = await fetch("/api/knowledge/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ client_id: client.id, authoritative_column: "purchase_account", rows: data.rows })
+      });
+      const resData = await res.json();
+      if (!res.ok) throw new Error(resData.error || "Import failed");
+      
+      setResult(resData);
+      
+      // Auto-redirect after 1.2 seconds so user sees the stats
+      setTimeout(async () => {
+        const clientRes = await fetch(`/api/clients/${client.id}`);
+        const clientData = await clientRes.json();
+        if (clientData.client) onInitialized(clientData.client);
+      }, 1200);
+      
+    } catch (e) { 
+      setError(e.message); 
+      setImporting(false);
+    }
+  };
+
+  return (
+    <section className="landing">
+      <button onClick={onBack} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 8, padding: "6px 14px", cursor: "pointer", color: "var(--muted)", marginBottom: 24, fontSize: 13 }}>← Back to Clients</button>
+
+      <p className="eyebrow">ONE-TIME SETUP</p>
+      <h2>Initialize Knowledge Base — {client.display_name}</h2>
+      <p className="lead" style={{ maxWidth: 620 }}>
+        Upload this client's historical Items Sheet to teach the system their existing accounting history.
+        <strong> This is a one-time step.</strong> After this, the system will automatically classify items from this knowledge base during monthly audits.
+      </p>
+
+      <div style={{ background: "#fef9c3", border: "1px solid #fde68a", borderRadius: 10, padding: "14px 18px", marginBottom: 24, maxWidth: 620 }}>
+        <strong>⚠️ Important:</strong> You will not be asked to upload this file again. The knowledge base will grow automatically as your team approves new classifications during monthly audits.
+      </div>
+
+      {!result ? (
+        <>
+          <div className="uploads">
+            <Upload title="Historical Items Sheet" help={importing ? "Processing and importing item list..." : "Upload the client's Zoho Items export"} file={file} onChange={handleFile} />
+          </div>
+          {importing && (
+            <div style={{ textAlign: "center", padding: "20px 0", color: "var(--muted)" }}>
+              <span className="setup-spinner" style={{ display: "inline-block", marginRight: 8 }}>⚙️</span>
+              Learning historical accounts...
+            </div>
+          )}
+          {error && <p style={{ color: "#dc2626", marginTop: 12 }}>⚠ {error}</p>}
+        </>
+      ) : (
+        <div style={{ background: "var(--surface)", border: "1.5px solid #bbf7d0", borderRadius: 12, padding: "28px 32px", maxWidth: 520, textAlign: "center" }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>✅</div>
+          <h3 style={{ margin: "0 0 8px", color: "var(--ink)" }}>Knowledge Base Initialized</h3>
+          <p style={{ color: "var(--muted)", marginBottom: 20 }}>The system has learned from this client's historical data.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, textAlign: "center", marginBottom: 24 }}>
+            <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px" }}>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--ink)" }}>{result.inserted?.toLocaleString("en-IN")}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Items Imported</div>
+            </div>
+            <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px" }}>
+              <div style={{ fontSize: 24, fontWeight: 700, color: "var(--ink)" }}>{result.accounts_imported}</div>
+              <div style={{ fontSize: 12, color: "var(--muted)" }}>Account Heads</div>
+            </div>
+            {result.conflicts > 0 && (
+              <div style={{ background: "#fef3c7", borderRadius: 8, padding: "12px" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "#92400e" }}>{result.conflicts}</div>
+                <div style={{ fontSize: 12, color: "#92400e" }}>Conflicting Items</div>
+              </div>
+            )}
+            {result.skipped > 0 && (
+              <div style={{ background: "var(--bg)", borderRadius: 8, padding: "12px" }}>
+                <div style={{ fontSize: 24, fontWeight: 700, color: "var(--muted)" }}>{result.skipped}</div>
+                <div style={{ fontSize: 12, color: "var(--muted)" }}>Skipped (no name)</div>
+              </div>
+            )}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--muted)" }}>You will not be asked to upload this file again. Redirecting...</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+// ─── KNOWLEDGE STATUS BANNER ─────────────────────────────────────────────────
+function KnowledgeStatusBanner({ client, knowledgeCount, onSwitch }) {
+  if (!client) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, background: client.knowledge_initialized ? "#f0fdf4" : "#fef9c3", border: `1px solid ${client.knowledge_initialized ? "#bbf7d0" : "#fde68a"}`, borderRadius: 10, padding: "7px 14px", fontSize: 13 }}>
+      <span>{client.knowledge_initialized ? "📚" : "⚠️"}</span>
+      <div>
+        <strong style={{ color: "var(--ink)" }}>{client.display_name}</strong>
+        <span style={{ color: "var(--muted)", marginLeft: 8 }}>
+          {client.knowledge_initialized ? `${knowledgeCount.toLocaleString("en-IN")} KB items` : "Knowledge Not Initialized"}
+        </span>
+      </div>
+      <button onClick={onSwitch} style={{ background: "none", border: "1px solid var(--border)", borderRadius: 6, padding: "3px 10px", cursor: "pointer", color: "var(--muted)", fontSize: 12, marginLeft: 4 }}>
+        Switch Client
+      </button>
+    </div>
+  );
+}
+
+// ─── HOME COMPONENT ──────────────────────────────────────────────────────────
 export default function Home() {
-  const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
+  // ── Client & Knowledge State ─────────────────────────────────────────────
+  const [clients, setClients] = useState([]);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [clientsLoading, setClientsLoading] = useState(true);
+  const [knowledgeItems, setKnowledgeItems] = useState([]);
+  const [knowledgeLoading, setKnowledgeLoading] = useState(false);
+
+  // ── Audit State ──────────────────────────────────────────────────────────
+  const [current, setCurrent] = useState(null);
+  const [previous, setPrevious] = useState(null);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState("Overview");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
+  const [showAiSetup, setShowAiSetup] = useState(false);
+  const [showDataPreview, setShowDataPreview] = useState(false);
+
+  // ── AI Config ────────────────────────────────────────────────────────────
   const [aiConfig, setAiConfig] = useState(() => {
     if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem("ai_config");
-      if (raw) return JSON.parse(raw);
-    } catch (e) {}
+    try { const raw = localStorage.getItem("ai_config"); if (raw) return JSON.parse(raw); } catch (e) {}
     return null;
   });
   const [apiKey, setApiKey] = useState(() => {
@@ -1406,12 +1419,41 @@ export default function Home() {
     return sessionStorage.getItem("groq_api_key") || "";
   });
   const groqModel = aiConfig?.model || "";
-  const [showAiSetup, setShowAiSetup] = useState(false);
-  const [showDataPreview, setShowDataPreview] = useState(false);
 
+  // ── Load clients on mount ────────────────────────────────────────────────
+  const loadClients = useCallback(async () => {
+    setClientsLoading(true);
+    try {
+      const res = await fetch("/api/clients");
+      const data = await res.json();
+      setClients(data.clients || []);
+    } catch (e) { console.error("Failed to load clients:", e); }
+    finally { setClientsLoading(false); }
+  }, []);
+
+  useEffect(() => { loadClients(); }, [loadClients]);
+
+  // ── Load knowledge when client selected ──────────────────────────────────
+  useEffect(() => {
+    if (!selectedClient?.knowledge_initialized) { setKnowledgeItems([]); return; }
+    setKnowledgeLoading(true);
+    fetch(`/api/knowledge?client_id=${selectedClient.id}`)
+      .then(r => r.json())
+      .then(d => setKnowledgeItems(d.knowledge || []))
+      .catch(e => console.error("Failed to load knowledge:", e))
+      .finally(() => setKnowledgeLoading(false));
+  }, [selectedClient]);
+
+  // ── Screen routing ───────────────────────────────────────────────────────
+  const screen = !selectedClient
+    ? "client_manager"
+    : !selectedClient.knowledge_initialized
+    ? "knowledge_init"
+    : "audit";
+
+  // ── Handlers ─────────────────────────────────────────────────────────────
   const saveAiConfig = (key, config) => {
-    setApiKey(key);
-    setAiConfig(config);
+    setApiKey(key); setAiConfig(config);
     if (typeof window !== "undefined") {
       sessionStorage.setItem("groq_api_key", key);
       localStorage.setItem("ai_config", JSON.stringify(config));
@@ -1421,11 +1463,34 @@ export default function Home() {
   };
 
   const setT = (k, v) => setThresholds(t => ({ ...t, [k]: v }));
-  const result = useMemo(() => current && previous ? analyse(current, previous, thresholds) : null, [current, previous, thresholds]);
+
+  const result = useMemo(
+    () => current && previous ? analyse(current, previous, thresholds, knowledgeItems) : null,
+    [current, previous, thresholds, knowledgeItems]
+  );
+
   const upload = async (file, setter) => { try { setError(""); setter(await readFile(file)); } catch (e) { setError(e.message); } };
   const spend = x => x?.records.reduce((s, r) => s + r.total, 0) || 0;
   const total = result && (result.duplicates.length + result.vendors.length + result.items.length + result.prices.length + result.misclassifications.length);
   const sharedAccounts = useMemo(() => current ? [...new Set(current.records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))] : [], [current]);
+
+  const handleClientSwitch = () => {
+    setSelectedClient(null);
+    setCurrent(null);
+    setPrevious(null);
+    setKnowledgeItems([]);
+    setTab("Overview");
+  };
+
+  const handleKbSave = (item) => {
+    setKnowledgeItems(prev => {
+      const norm = normalizeItemName(item.item);
+      const exists = prev.findIndex(k => k.item_name_norm === norm);
+      const newItem = { item_name_raw: item.item, item_name_norm: norm, account_head: item.account, source: "human_approved", verified: true, confidence: 100 };
+      if (exists >= 0) { const next = [...prev]; next[exists] = newItem; return next; }
+      return [...prev, newItem];
+    });
+  };
 
   return (
     <main>
@@ -1434,219 +1499,253 @@ export default function Home() {
           <p className="eyebrow">FINANCE CONTROL CENTER</p>
           <h1>P&L Audit Desk</h1>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            className={`header-ai-btn ${aiConfig?.verified && apiKey ? "configured" : ""}`}
-            onClick={() => setShowAiSetup(true)}
-          >
-            {aiConfig?.verified && apiKey
-              ? `⚙️ AI: ${groqModel.replace("llama-", "").replace("-versatile", "").replace("-instant", "")}`
-              : aiConfig?.verified && !apiKey
-              ? `⚙️ AI: Re-enter Key ⚠️`
-              : `⚙️ AI: Setup`}
-          </button>
-          <p className="privacy"><i /> Local analysis - files stay on your device</p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          {selectedClient && (
+            <KnowledgeStatusBanner
+              client={selectedClient}
+              knowledgeCount={knowledgeItems.length}
+              onSwitch={handleClientSwitch}
+            />
+          )}
+          {screen === "audit" && (
+            <button
+              className={`header-ai-btn ${aiConfig?.verified && apiKey ? "configured" : ""}`}
+              onClick={() => setShowAiSetup(true)}
+            >
+              {aiConfig?.verified && apiKey
+                ? `⚙️ AI: ${groqModel.replace("llama-", "").replace("-versatile", "").replace("-instant", "")}`
+                : aiConfig?.verified && !apiKey
+                ? `⚙️ AI: Re-enter Key ⚠️`
+                : `⚙️ AI: Setup`}
+            </button>
+          )}
+          <p className="privacy"><i /> Local analysis — files stay on your device</p>
         </div>
       </header>
 
-      {!result ? (
-        <section className="landing">
-          <p className="eyebrow">ZOHO BOOKS PURCHASE & P&L REVIEW</p>
-          <h2>Find what the spreadsheet misses.</h2>
-          <p className="lead">Compare two Zoho purchase exports to flag duplicate bills, account misclassifications, vendor movements, item variation, price exceptions, and explore your Account Head hierarchy.</p>
-          <div className="chips">
-            <b>Misclassification alerts</b>
-            <b>Account heads pivot</b>
-            <b>Duplicate bills</b>
-            <b>Vendor variation</b>
-            <b>Item variation</b>
-            <b>Price exceptions</b>
-          </div>
-          <div className="uploads">
-            <Upload title="Current month" help="Upload the latest Zoho export" file={current} onChange={f => upload(f, setCurrent)} />
-            <Upload title="Previous month" help="Upload the month to compare" file={previous} onChange={f => upload(f, setPrevious)} />
-          </div>
-          {error && <p className="error">{error}</p>}
-          <p className="note">Required: Bill Date and Vendor Name. Recommended: Account Name, Bill Number, Item Name, Quantity, Rate, Branch, and Item Total for full audit.</p>
-        </section>
-      ) : (
+      {/* ── Screen 1: No client selected ── */}
+      {screen === "client_manager" && (
+        <ClientManagerScreen
+          clients={clients}
+          loading={clientsLoading}
+          onSelect={setSelectedClient}
+          onCreated={(client) => {
+            setClients(prev => [client, ...prev]);
+            setSelectedClient(client);
+          }}
+        />
+      )}
+
+      {/* ── Screen 2: Client selected but KB not initialized ── */}
+      {screen === "knowledge_init" && (
+        <KnowledgeInitializer
+          client={selectedClient}
+          onInitialized={(updatedClient) => {
+            setSelectedClient(updatedClient);
+            setClients(prev => prev.map(c => c.id === updatedClient.id ? updatedClient : c));
+          }}
+          onBack={handleClientSwitch}
+        />
+      )}
+
+      {/* ── Screen 3: Audit workspace ── */}
+      {screen === "audit" && (
         <>
-          <section className="run">
-            <div>
-              <strong>Analysis ready</strong>
-              <small>{current.name} vs {previous.name}</small>
+          {knowledgeLoading && (
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 16px", marginBottom: 8, fontSize: 13, color: "#1e40af" }}>
+              📚 Loading Knowledge Base for {selectedClient.display_name}...
             </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="ai-setup-run-btn" onClick={() => setShowAiSetup(true)}>
-                ⚙️ {groqModel ? `AI: ${groqModel}` : "Configure AI"}
-              </button>
-              <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
-              <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
-            </div>
-          </section>
+          )}
 
-          <section className="thresholds">
-            <p className="eyebrow">SENSITIVITY THRESHOLDS</p>
-            <div className="thresh-row">
-              <ThresholdInput label="Vendor variation" value={thresholds.vendor} onChange={v => setT("vendor", v)} />
-              <ThresholdInput label="Item variation" value={thresholds.item} onChange={v => setT("item", v)} />
-              <ThresholdInput label="Price exception" value={thresholds.price} onChange={v => setT("price", v)} maxVal={1000} />
-              <button className="thresh-reset" onClick={() => setThresholds({ vendor: 20, item: 25, price: 20 })}>Reset to defaults</button>
-            </div>
-          </section>
+          {!result ? (
+            <section className="landing">
+              <p className="eyebrow">ZOHO BOOKS PURCHASE &amp; P&L REVIEW</p>
+              <h2>Find what the spreadsheet misses.</h2>
+              <p className="lead">Compare two Zoho purchase exports to flag duplicate bills, account misclassifications, vendor movements, item variation, price exceptions, and explore your Account Head hierarchy.</p>
 
-          <nav>
-            {["Overview", "Misclassifications", "Account heads", "Duplicate bills", "Vendor variation", "Purchase variation", "Price exceptions"].map(x => (
-              <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>
-                {x}
-                {x === "Misclassifications" && result.misclassifications.length > 0 && (
-                  <span className="nav-badge-count">{result.misclassifications.length}</span>
-                )}
-              </button>
-            ))}
-          </nav>
-
-          {tab === "Overview" && (
-            <>
-              <section className="metrics">
-                <Card label="Audit findings" value={total} warm />
-                <Card label="Current-month spend" value={show(spend(current))} />
-                <Card label="Spend movement" value={show(spend(current) - spend(previous))} />
-                <Card label="Rows reviewed" value={current.records.length.toLocaleString("en-IN")} />
-              </section>
-              <section className="panel">
-                <div className="panelhead">
-                  <div>
-                    <p className="eyebrow">PRIORITY QUEUE</p>
-                    <h2>What to review first</h2>
-                  </div>
-                  <b className="badge">
-                    {result.misclassifications.length + result.duplicates.length} critical issues
-                  </b>
+              {knowledgeItems.length > 0 && (
+                <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 8, padding: "10px 16px", marginBottom: 20, fontSize: 13, color: "#1e40af", display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  📚 <strong>{knowledgeItems.length.toLocaleString("en-IN")} knowledge items</strong> loaded — items will be classified from Knowledge Base first
                 </div>
-                {result.misclassifications.length || result.duplicates.length || result.vendors.length || result.prices.length ? (
-                  <div className="queue">
-                    {[
-                      ...result.misclassifications.slice(0, 3).map(x => ({
-                        title: `Wrong Account: ${x.item}`,
-                        detail: `Booked in "${x.actualAccount}" → Should be "${x.suggestedAccount}"`,
-                        value: x.total,
-                        red: true
-                      })),
-                      ...result.duplicates.slice(0, 3).map(x => ({
-                        title: x.kind,
-                        detail: `${x.rows[0].vendor} - ${x.rows.length} matching lines`,
-                        value: x.total,
-                        red: x.risk === "Critical"
-                      })),
-                      ...result.vendors.slice(0, 2).map(x => ({
-                        title: `${x.status} vendor`,
-                        detail: x.label,
-                        value: x.diff
-                      })),
-                      ...result.prices.slice(0, 2).map(x => ({
-                        title: "High item price",
-                        detail: `${x.item} - ${x.vendor}`,
-                        value: x.total
-                      }))
-                    ].slice(0, 8).map((x, i) => (
-                      <div className="queueitem" key={i}>
-                        <i className={x.red ? "red" : "amber"} />
-                        <div><strong>{x.title}</strong><small>{x.detail}</small></div>
-                        <b>{show(x.value)}</b>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <Empty>No material flags found.</Empty>
-                )}
+              )}
+
+              <div className="chips">
+                <b>Knowledge-first classification</b>
+                <b>Misclassification alerts</b>
+                <b>Account heads pivot</b>
+                <b>Duplicate bills</b>
+                <b>Vendor variation</b>
+                <b>Item variation</b>
+                <b>Price exceptions</b>
+              </div>
+              <div className="uploads">
+                <Upload title="Current month" help="Upload the latest Zoho export" file={current} onChange={f => upload(f, setCurrent)} />
+                <Upload title="Previous month" help="Upload the month to compare" file={previous} onChange={f => upload(f, setPrevious)} />
+              </div>
+              {error && <p className="error">{error}</p>}
+              <p className="note">Required: Bill Date and Vendor Name. Recommended: Account Name, Bill Number, Item Name, Quantity, Rate, Branch, and Item Total for full audit.</p>
+            </section>
+          ) : (
+            <>
+              <section className="run">
+                <div>
+                  <strong>Analysis ready</strong>
+                  <small>{current.name} vs {previous.name}</small>
+                </div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="ai-setup-run-btn" onClick={() => setShowAiSetup(true)}>⚙️ {groqModel ? `AI: ${groqModel}` : "Configure AI"}</button>
+                  <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
+                  <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
+                </div>
               </section>
+
+              <section className="thresholds">
+                <p className="eyebrow">SENSITIVITY THRESHOLDS</p>
+                <div className="thresh-row">
+                  <ThresholdInput label="Vendor variation" value={thresholds.vendor} onChange={v => setT("vendor", v)} />
+                  <ThresholdInput label="Item variation" value={thresholds.item} onChange={v => setT("item", v)} />
+                  <ThresholdInput label="Price exception" value={thresholds.price} onChange={v => setT("price", v)} maxVal={1000} />
+                  <button className="thresh-reset" onClick={() => setThresholds({ vendor: 20, item: 25, price: 20 })}>Reset to defaults</button>
+                </div>
+              </section>
+
+              <nav>
+                {["Overview", "Misclassifications", "Account heads", "Duplicate bills", "Vendor variation", "Purchase variation", "Price exceptions"].map(x => (
+                  <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>
+                    {x}
+                    {x === "Misclassifications" && result.misclassifications.length > 0 && (
+                      <span className="nav-badge-count">{result.misclassifications.length}</span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+
+              {tab === "Overview" && (
+                <>
+                  <section className="metrics">
+                    <Card label="Audit findings" value={total} warm />
+                    <Card label="Current-month spend" value={show(spend(current))} />
+                    <Card label="Spend movement" value={show(spend(current) - spend(previous))} />
+                    <Card label="Rows reviewed" value={current.records.length.toLocaleString("en-IN")} />
+                  </section>
+                  <section className="panel">
+                    <div className="panelhead">
+                      <div><p className="eyebrow">PRIORITY QUEUE</p><h2>What to review first</h2></div>
+                      <b className="badge">{result.misclassifications.length + result.duplicates.length} critical issues</b>
+                    </div>
+                    {result.misclassifications.length || result.duplicates.length || result.vendors.length || result.prices.length ? (
+                      <div className="queue">
+                        {[
+                          ...result.misclassifications.slice(0, 3).map(x => ({ title: `Wrong Account: ${x.item}`, detail: `Booked in "${x.actualAccount}" → Should be "${x.suggestedAccount}"`, value: x.total, red: true })),
+                          ...result.duplicates.slice(0, 3).map(x => ({ title: x.kind, detail: `${x.rows[0].vendor} - ${x.rows.length} matching lines`, value: x.total, red: x.risk === "Critical" })),
+                          ...result.vendors.slice(0, 2).map(x => ({ title: `${x.status} vendor`, detail: x.label, value: x.diff })),
+                          ...result.prices.slice(0, 2).map(x => ({ title: "High item price", detail: `${x.item} - ${x.vendor}`, value: x.total }))
+                        ].slice(0, 8).map((x, i) => (
+                          <div className="queueitem" key={i}>
+                            <i className={x.red ? "red" : "amber"} />
+                            <div><strong>{x.title}</strong><small>{x.detail}</small></div>
+                            <b>{show(x.value)}</b>
+                          </div>
+                        ))}
+                      </div>
+                    ) : <Empty>No material flags found.</Empty>}
+                  </section>
+                </>
+              )}
+
+              {tab === "Misclassifications" && (
+                <MisclassificationsView
+                  items={result.misclassifications}
+                  current={current}
+                  onGoToPivot={() => setTab("Account heads")}
+                  sharedApiKey={apiKey}
+                  sharedModel={groqModel}
+                  onOpenSetup={() => setShowAiSetup(true)}
+                  sharedAccounts={sharedAccounts}
+                  clientId={selectedClient?.id}
+                  onSaveToKnowledge={handleKbSave}
+                />
+              )}
+
+              {tab === "Account heads" && <AccountPivot current={current} />}
+
+              {tab === "Duplicate bills" && (
+                <section className="panel">
+                  <Panel title="Duplicate bill patterns" badge={`${result.duplicates.length} findings`} />
+                  <Table head={["Classification", "Vendor", "Item", "Matching lines", "Exposure"]}>
+                    {result.duplicates.length ? result.duplicates.map((x, i) => (
+                      <Fragment key={i}>
+                        <tr>
+                          <td><b className={x.risk === "Critical" ? "pill critical" : "pill"}>{x.kind}</b></td>
+                          <td>{x.rows[0].vendor}</td>
+                          <td>{x.rows[0].item || "-"}</td>
+                          <td>{x.rows.length}</td>
+                          <td>{show(x.total)}</td>
+                        </tr>
+                        <tr>
+                          <td colSpan="5" style={{ padding: "0 0 10px 0", background: "var(--surface)" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
+                              <thead>
+                                <tr style={{ background: "var(--border)" }}>
+                                  <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Bill No.</th>
+                                  <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Date</th>
+                                  <th style={{ padding: "5px 14px", textAlign: "right", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {x.rows.map((r, j) => (
+                                  <tr key={j} style={{ borderBottom: "1px solid var(--border)" }}>
+                                    <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.bill || "—"}</td>
+                                    <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.date || "—"}</td>
+                                    <td style={{ padding: "5px 14px", textAlign: "right", color: x.risk === "Critical" ? "var(--red, #c0392b)" : "var(--text)", fontWeight: 500 }}>{show(r.total)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      </Fragment>
+                    )) : <tr><td colSpan="5"><Empty>No duplicate patterns found.</Empty></td></tr>}
+                  </Table>
+                  {result.duplicates.length > 0 && <CopyDuplicatesButton duplicates={result.duplicates} />}
+                </section>
+              )}
+
+              {tab === "Vendor variation" && <Changes title="Vendor variation" rows={result.vendors} field="Vendor" threshold={thresholds.vendor} />}
+              {tab === "Purchase variation" && <Changes title="Purchase variation" rows={result.items} field="Item" threshold={thresholds.item} />}
+
+              {tab === "Price exceptions" && (
+                <section className="panel">
+                  <Panel title="Items purchased above weighted average" badge={`${thresholds.price}%+ above average`} />
+                  <Table head={["Item", "Vendor", "Rate paid", "Weighted average", "Variance"]}>
+                    {result.prices.length ? result.prices.map((x, i) => (
+                      <tr key={i}>
+                        <td>{x.item}</td><td>{x.vendor}</td><td>{show(x.rate)}</td><td>{show(x.avg)}</td>
+                        <td className="bad">+{(x.pct * 100).toFixed(0)}%</td>
+                      </tr>
+                    )) : <tr><td colSpan="5"><Empty>No price exceptions found.</Empty></td></tr>}
+                  </Table>
+                </section>
+              )}
             </>
           )}
 
-          {tab === "Misclassifications" && (
-            <MisclassificationsView
-              items={result.misclassifications}
-              current={current}
-              onGoToPivot={() => setTab("Account heads")}
-              sharedApiKey={apiKey}
-              sharedModel={groqModel}
-              onOpenSetup={() => setShowAiSetup(true)}
-              sharedAccounts={sharedAccounts}
-            />
-          )}
-
-          {tab === "Account heads" && <AccountPivot current={current} />}
-
-          {tab === "Duplicate bills" && (
-            <section className="panel">
-              <Panel title="Duplicate bill patterns" badge={`${result.duplicates.length} findings`} />
-              <Table head={["Classification", "Vendor", "Item", "Matching lines", "Exposure"]}>
-                {result.duplicates.length ? result.duplicates.map((x, i) => (
-                  <tr key={i}>
-                    <td><b className={x.risk === "Critical" ? "pill critical" : "pill"}>{x.kind}</b></td>
-                    <td>{x.rows[0].vendor}</td>
-                    <td>{x.rows[0].item || "-"}</td>
-                    <td>{x.rows.length}</td>
-                    <td>{show(x.total)}</td>
-                  </tr>
-                )) : <tr><td colSpan="5"><Empty>No duplicate patterns found.</Empty></td></tr>}
-              </Table>
-            </section>
-          )}
-
-          {tab === "Vendor variation" && <Changes title="Vendor variation" rows={result.vendors} field="Vendor" threshold={thresholds.vendor} />}
-          {tab === "Purchase variation" && <Changes title="Purchase variation" rows={result.items} field="Item" threshold={thresholds.item} />}
-
-          {tab === "Price exceptions" && (
-            <section className="panel">
-              <Panel title="Items purchased above weighted average" badge={`${thresholds.price}%+ above average`} />
-              <Table head={["Item", "Vendor", "Rate paid", "Weighted average", "Variance"]}>
-                {result.prices.length ? result.prices.map((x, i) => (
-                  <tr key={i}>
-                    <td>{x.item}</td>
-                    <td>{x.vendor}</td>
-                    <td>{show(x.rate)}</td>
-                    <td>{show(x.avg)}</td>
-                    <td className="bad">+{(x.pct * 100).toFixed(0)}%</td>
-                  </tr>
-                )) : <tr><td colSpan="5"><Empty>No price exceptions found.</Empty></td></tr>}
-              </Table>
-            </section>
-          )}
-        </>
-      )}
-
-      {/* Data preview modal */}
-      {current && showDataPreview && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, overflowY: "auto", padding: "40px 16px" }}>
-          <div style={{ maxWidth: 1100, margin: "0 auto", background: "var(--surface)", borderRadius: 12, overflow: "hidden" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
-              <strong>Data Verification Preview</strong>
-              <button className="pivot-btn" onClick={() => setShowDataPreview(false)}>Close ✕</button>
+          {/* Data preview modal */}
+          {current && showDataPreview && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, overflowY: "auto", padding: "40px 16px" }}>
+              <div style={{ maxWidth: 1100, margin: "0 auto", background: "var(--surface)", borderRadius: 12, overflow: "hidden" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+                  <strong>Data Verification Preview</strong>
+                  <button className="pivot-btn" onClick={() => setShowDataPreview(false)}>Close ✕</button>
+                </div>
+                <DataPreview data={current} />
+              </div>
             </div>
-            <DataPreview data={current} />
-          </div>
-        </div>
-      )}
+          )}
 
-      {/* AI Setup & Configuration Modal */}
-      <AiSetupModal
-        isOpen={showAiSetup}
-        onClose={() => setShowAiSetup(false)}
-        apiKey={apiKey}
-        aiConfig={aiConfig}
-        onSave={saveAiConfig}
-      />
-
-      {/* AI Chat Widget — always visible when file loaded */}
-      {current && (
-        <AiChatWidget
-          availableAccounts={sharedAccounts}
-          apiKey={apiKey}
-          model={groqModel}
-          onOpenSetup={() => setShowAiSetup(true)}
-        />
+          <AiSetupModal isOpen={showAiSetup} onClose={() => setShowAiSetup(false)} apiKey={apiKey} aiConfig={aiConfig} onSave={saveAiConfig} />
+          {current && <AiChatWidget availableAccounts={sharedAccounts} apiKey={apiKey} model={groqModel} onOpenSetup={() => setShowAiSetup(true)} />}
+        </>
       )}
     </main>
   );
@@ -1661,9 +1760,7 @@ function Changes({ title, rows, field, threshold }) {
       <Table head={[field, "Current month", "Previous month", "Change", "Status"]}>
         {rows.length ? rows.map((x, i) => (
           <tr key={i}>
-            <td>{x.label}</td>
-            <td>{show(x.total)}</td>
-            <td>{show(x.old)}</td>
+            <td>{x.label}</td><td>{show(x.total)}</td><td>{show(x.old)}</td>
             <td className={x.diff >= 0 ? "bad" : "good"}>{x.diff >= 0 ? "+" : ""}{show(x.diff)}</td>
             <td><b className="pill">{x.status}</b></td>
           </tr>
@@ -1673,3 +1770,67 @@ function Changes({ title, rows, field, threshold }) {
   );
 }
 
+function CopyDuplicatesButton({ duplicates }) {
+  const [copied, setCopied] = useState(false);
+
+  function buildText() {
+    const colW = [12, 20, 22, 26, 16, 14];
+    const pad = (s, w) => String(s ?? "—").padEnd(w).slice(0, w);
+    const lines = [];
+    lines.push("DUPLICATE BILL REPORT");
+    lines.push("=".repeat(90));
+    lines.push("");
+
+    duplicates.forEach((x, idx) => {
+      lines.push(`${idx + 1}. ${x.kind.toUpperCase()}   (${x.rows.length} matching lines  |  Total Exposure: ${show(x.total)})`);
+      lines.push("-".repeat(90));
+      const header = pad("Date", colW[0]) + pad("Bill No.", colW[1]) + pad("Vendor Name", colW[2]) + pad("Item", colW[3]) + pad("Qty", colW[4]) + pad("Amount", colW[5]);
+      lines.push(header);
+      lines.push("-".repeat(90));
+      x.rows.forEach(r => {
+        lines.push(
+          pad(r.date || "—", colW[0]) +
+          pad(r.bill || "—", colW[1]) +
+          pad(r.vendor || "—", colW[2]) +
+          pad(r.item || "—", colW[3]) +
+          pad(r.qty != null && r.qty !== 0 ? r.qty : "—", colW[4]) +
+          pad(show(r.total), colW[5])
+        );
+      });
+      lines.push("");
+    });
+
+    lines.push("=".repeat(90));
+    lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
+    return lines.join("\n");
+  }
+
+  function handleCopy() {
+    navigator.clipboard.writeText(buildText()).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    });
+  }
+
+  return (
+    <div style={{ display: "flex", justifyContent: "flex-end", padding: "12px 0 2px 0" }}>
+      <button
+        onClick={handleCopy}
+        style={{
+          display: "inline-flex", alignItems: "center", gap: 7,
+          padding: "8px 18px", borderRadius: 8, border: "1px solid var(--border)",
+          background: copied ? "var(--green, #27ae60)" : "var(--surface)",
+          color: copied ? "#fff" : "var(--text)",
+          fontWeight: 600, fontSize: "0.82rem", cursor: "pointer",
+          transition: "background 0.25s, color 0.25s",
+        }}
+      >
+        {copied ? (
+          <><span>✓</span> Copied!</>
+        ) : (
+          <><span style={{ fontSize: "1rem" }}>📋</span> Copy for Accountant</>
+        )}
+      </button>
+    </div>
+  );
+}
