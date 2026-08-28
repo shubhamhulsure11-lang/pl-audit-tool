@@ -178,6 +178,26 @@ export function sheetToRows(sheet, headerRow = 1) {
   return data;
 }
 
+// ─── Exact (whitespace-normalized) header matching for columns that must ─────
+// never be fuzzy-matched (e.g. summing two distinctly-named discount columns
+// without risking a double count, or picking the exact TCS column instead of
+// a similarly-worded "Applicable amount for TCS" base column).
+export function normalizeHeader(s) {
+  return String(s || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+export function sumExactCols(row, candidateNames) {
+  if (!row) return 0;
+  const normCandidates = candidateNames.map(normalizeHeader);
+  let total = 0;
+  for (const k of Object.keys(row)) {
+    if (normCandidates.includes(normalizeHeader(k))) {
+      total += cleanNum(row[k]);
+    }
+  }
+  return total;
+}
+
 // ─── Helper to find header key by fuzzy matching ──────────────────────────────
 export function getRowVal(row, candidates) {
   if (!row) return 0;
@@ -293,24 +313,47 @@ export async function runZomatoRecon({
   const weekRanges = generateWeekRanges(firstWeekStart, firstWeekEnd, lastWeekStart, lastWeekEnd);
   const bankTxs = await parseBankTransactions(bankFile);
 
+  // Zomato's own settlement report labels several fee columns as their
+  // pre-GST amount; Zomato charges 18% GST on its own service/convenience/
+  // long-distance fees, so those columns must be grossed up by 1.18x to
+  // match what the platform actually deducts. This constant mirrors that.
+  const ZOMATO_FEE_GST_MULTIPLIER = 1.18;
+
+  const DISCOUNT_EXACT_COLS = [
+    "Restaurant discount (Promo)",
+    "Restaurant discount [Promo]",
+    "Restaurant discount (BOGO, Freebies, Gold, Brand pack & others)",
+    "Restaurant Discount [BOGO, Freebies, Gold, Brand pack & others]",
+    "Restaurant discount [Flat offs, Freebies, Gold, Brand pack & others]",
+    "Delivery charge discount/ Relisting discount",
+    "Delivery charge discount / Relisting discount",
+  ];
+  const TCS_EXACT_COLS = ["TCS IGST amount", "Tax collected at source"];
+  const CANCELLED_STATUSES = ["CANCELLED", "TIMEDOUT", "TIMEOUT", "REJECTED"];
+
   const weekDataMap = {};
   weekRanges.forEach((w) => {
     weekDataMap[w.weekNum] = {
       week: w,
       orders: 0,
-      itemTotal: 0,
-      packagingCharges: 0,
+      // Delivered-orders-only figures (Zomato only counts a delivered
+      // order's item value/fees toward payout; cancelled orders don't).
+      itemTotalDelivered: 0,
+      packagingDelivered: 0,
+      discountDelivered: 0,
+      gstDelivered: 0,
+      baseServiceFeeDelivered: 0,
+      convenienceFeeDelivered: 0,
+      discountOnServiceFeeDelivered: 0,
+      longDistanceFeeDelivered: 0,
+      discountOnLongDistanceDelivered: 0,
+      // Cancelled-orders-only figure.
       compensationCancelled: 0,
-      discounts: 0,
-      gstCollected: 0,
-      commission: 0,
-      paymentMechanismFee: 0,
-      discountOnServiceFee: 0,
-      longDistanceFee: 0,
-      customerCompensation: 0,
-      tcs: 0,
-      tds: 0,
-      gstDeduction: 0,
+      // Applies across delivered + cancelled rows (matches Zomato's own
+      // "total" aggregation for tax lines).
+      tdsAll: 0,
+      tcsAll: 0,
+      gstPaidByZomatoAll: 0,
       marketingAds: 0,
       hyperpure: 0,
       expectedPayout: 0,
@@ -376,19 +419,37 @@ export async function runZomatoRecon({
         const wData = weekDataMap[targetWeek.weekNum];
 
         wData.orders += 1;
-        wData.itemTotal += getRowVal(r, ["subtotal", "items total", "item total", "bill amount", "order amount"]);
-        wData.packagingCharges += getRowVal(r, ["packaging charge", "packing charge"]);
-        wData.compensationCancelled += getRowVal(r, ["net additions", "cancellation refund", "compensation"]);
-        wData.discounts += getRowVal(r, ["restaurant discount", "promo", "bogo", "freebies", "gold", "discount"]);
-        wData.gstCollected += getRowVal(r, ["total gst collected", "gst collected", "gst"]);
-        wData.commission += getRowVal(r, ["base service fee", "service fee", "platform fee", "commission"]);
-        wData.paymentMechanismFee += getRowVal(r, ["payment mechanism fee", "convenience fee"]);
-        wData.discountOnServiceFee += getRowVal(r, ["discount on service fee", "service fee capping"]);
-        wData.longDistanceFee += getRowVal(r, ["long distance", "fulfilment fee"]);
-        wData.customerCompensation += getRowVal(r, ["customer compensation", "recoupment"]);
-        wData.tcs += getRowVal(r, ["tcs"]);
-        wData.tds += getRowVal(r, ["tds"]);
-        wData.gstDeduction += getRowVal(r, ["gst deduction", "gst liability"]);
+
+        const status = getRowString(r, ["order status"]).toUpperCase();
+        const isDelivered = status === "DELIVERED";
+        const isCancelledGroup = CANCELLED_STATUSES.includes(status);
+
+        if (isDelivered) {
+          wData.itemTotalDelivered += getRowVal(r, [
+            "subtotal (items total)",
+            "subtotal",
+            "item total",
+            "bill amount",
+            "order amount",
+          ]);
+          wData.packagingDelivered += getRowVal(r, ["packaging charge", "packing charge"]);
+          wData.discountDelivered += sumExactCols(r, DISCOUNT_EXACT_COLS);
+          wData.gstDelivered += getRowVal(r, ["total gst collected from customers", "total gst collected", "gst collected"]);
+          wData.baseServiceFeeDelivered += getRowVal(r, ["base service fee", "service fee", "platform fee"]);
+          wData.convenienceFeeDelivered += getRowVal(r, ["payment mechanism fee", "convenience fee"]);
+          wData.discountOnServiceFeeDelivered += getRowVal(r, ["discount on service fee", "service fee capping"]);
+          wData.longDistanceFeeDelivered += getRowVal(r, ["long distance enablement fee", "long distance", "fulfilment fee"]);
+          wData.discountOnLongDistanceDelivered += getRowVal(r, ["discount on long distance enablement fee"]);
+        }
+        if (isCancelledGroup) {
+          wData.compensationCancelled += getRowVal(r, ["net additions", "cancellation refund", "compensation"]);
+        }
+        // Tax lines are Zomato's "total" (delivered + cancelled combined) aggregation.
+        if (isDelivered || isCancelledGroup) {
+          wData.tdsAll += getRowVal(r, ["tds 194o amount", "tds"]);
+          wData.tcsAll += sumExactCols(r, TCS_EXACT_COLS);
+          wData.gstPaidByZomatoAll += getRowVal(r, ["gst paid by zomato on behalf of restaurant", "gst paid by zomato"]);
+        }
 
         const utr = getRowString(r, ["bank utr", "utr", "ctr"]);
         if (utr && !wData.utrList.includes(utr)) {
@@ -416,18 +477,22 @@ export async function runZomatoRecon({
   // Build final structured table rows
   const weeks = weekRanges.map((w) => {
     const d = weekDataMap[w.weekNum];
-    const grossSales = d.itemTotal + d.packagingCharges + d.compensationCancelled;
-    const netSalesExclGst = Math.max(0, grossSales - d.discounts);
-    const netCommission = Math.max(0, d.commission + d.paymentMechanismFee - d.discountOnServiceFee + d.longDistanceFee);
-    const totalDeductions =
-      netCommission +
-      d.customerCompensation +
-      d.tcs +
-      d.tds +
-      d.gstDeduction +
-      d.marketingAds +
-      d.hyperpure;
-    const netPayout = Math.max(0, netSalesExclGst + d.gstCollected - totalDeductions);
+    const grossSales = d.itemTotalDelivered + d.packagingDelivered + d.compensationCancelled;
+    const discounts = d.discountDelivered;
+    const gstCollected = d.gstDelivered;
+    const netSalesExclGst = Math.max(0, grossSales - discounts);
+
+    // Zomato's own service/convenience/long-distance fees carry 18% GST on
+    // top of the raw column value in the settlement report.
+    const commission = d.baseServiceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER;
+    const otherChargesGrossed =
+      d.convenienceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER +
+      (d.longDistanceFeeDelivered - d.discountOnLongDistanceDelivered) * ZOMATO_FEE_GST_MULTIPLIER -
+      d.discountOnServiceFeeDelivered * ZOMATO_FEE_GST_MULTIPLIER;
+    const taxAdjustments = d.tdsAll + d.tcsAll + d.gstPaidByZomatoAll;
+    const otherDeductions = otherChargesGrossed + taxAdjustments + d.marketingAds + d.hyperpure;
+
+    const netPayout = Math.max(0, netSalesExclGst + gstCollected - commission - otherDeductions);
 
     // Bank match
     const bankCheck = matchBankPayout(netPayout, bankTxs);
@@ -437,13 +502,13 @@ export async function runZomatoRecon({
       label: w.label,
       orders: d.orders,
       grossSales,
-      packagingCharges: d.packagingCharges,
-      discounts: d.discounts,
-      gstCollected: d.gstCollected,
+      packagingCharges: d.packagingDelivered,
+      discounts,
+      gstCollected,
       netSalesExclGst,
-      commission: netCommission,
+      commission,
       marketingAds: d.marketingAds,
-      otherDeductions: d.customerCompensation + d.tcs + d.tds + d.gstDeduction + d.hyperpure,
+      otherDeductions,
       expectedPayout: netPayout,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
       bankDiff: bankCheck.matched ? bankCheck.diff : -netPayout,
