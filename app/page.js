@@ -1,6 +1,13 @@
 "use client";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
+import JSZip from "jszip";
+import {
+  extractZipRecursively,
+  classifyDeliverableFiles,
+  auditZomatoReconciliation,
+  auditSwiggyReconciliation,
+} from "./lib/reconciliation";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const clean = (v) => String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -1434,6 +1441,7 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
 }
 
 export default function Home() {
+  const [mainTab, setMainTab] = useState("purchase");
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
   const [aiConfig, setAiConfig] = useState(() => {
@@ -1492,198 +1500,227 @@ export default function Home() {
         </div>
       </header>
 
-      {!result ? (
-        <section className="landing">
-          <p className="eyebrow">ZOHO BOOKS PURCHASE & P&L REVIEW</p>
-          <h2>Find what the spreadsheet misses.</h2>
-          <p className="lead">Compare two Zoho purchase exports to flag duplicate bills, account misclassifications, vendor movements, item variation, price exceptions, and explore your Account Head hierarchy.</p>
-          <div className="chips">
-            <b>Misclassification alerts</b>
-            <b>Account heads pivot</b>
-            <b>Duplicate bills</b>
-            <b>Vendor variation</b>
-            <b>Item variation</b>
-            <b>Price exceptions</b>
-          </div>
-          <div className="uploads">
-            <Upload title="Current month" help="Upload the latest Zoho export" file={current} onChange={f => upload(f, setCurrent)} />
-            <Upload title="Previous month" help="Upload the month to compare" file={previous} onChange={f => upload(f, setPrevious)} />
-          </div>
-          {error && <p className="error">{error}</p>}
-          <p className="note">Required: Bill Date and Vendor Name. Recommended: Account Name, Bill Number, Item Name, Quantity, Rate, Branch, and Item Total for full audit.</p>
-        </section>
-      ) : (
+      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 24 }}>
+        {[
+          { id: "purchase", label: "Purchase Audit", sub: "Zoho P&L" },
+          { id: "sales",    label: "Sales Reconciliation", sub: "POS & Aggregators" },
+        ].map(t => (
+          <button
+            key={t.id}
+            onClick={() => setMainTab(t.id)}
+            style={{
+              background: "none", border: 0,
+              padding: "14px 24px",
+              cursor: "pointer",
+              textAlign: "left",
+              borderBottom: mainTab === t.id ? "2px solid var(--forest)" : "2px solid transparent",
+              transition: "0.15s",
+            }}
+          >
+            <span style={{ display: "block", fontWeight: 700, fontSize: "0.9rem", color: mainTab === t.id ? "var(--forest)" : "var(--muted)" }}>{t.label}</span>
+            <span style={{ display: "block", fontSize: "0.72rem", color: "var(--muted)", marginTop: 2 }}>{t.sub}</span>
+          </button>
+        ))}
+      </div>
+
+      {mainTab === "purchase" ? (
         <>
-          <section className="run">
-            <div>
-              <strong>Analysis ready</strong>
-              <small>{current.name} vs {previous.name}</small>
-            </div>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <button className="ai-setup-run-btn" onClick={() => setShowAiSetup(true)}>
-                ⚙️ {groqModel ? `AI: ${groqModel}` : "Configure AI"}
-              </button>
-              <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
-              <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
-            </div>
-          </section>
-
-          <section className="thresholds">
-            <p className="eyebrow">SENSITIVITY THRESHOLDS</p>
-            <div className="thresh-row">
-              <ThresholdInput label="Vendor variation" value={thresholds.vendor} onChange={v => setT("vendor", v)} />
-              <ThresholdInput label="Item variation" value={thresholds.item} onChange={v => setT("item", v)} />
-              <ThresholdInput label="Price exception" value={thresholds.price} onChange={v => setT("price", v)} maxVal={1000} />
-              <button className="thresh-reset" onClick={() => setThresholds({ vendor: 20, item: 25, price: 20 })}>Reset to defaults</button>
-            </div>
-          </section>
-
-          <nav>
-            {["Overview", "Misclassifications", "Account heads", "Duplicate bills", "Vendor variation", "Purchase variation", "Price exceptions"].map(x => (
-              <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>
-                {x}
-                {x === "Misclassifications" && result.misclassifications.length > 0 && (
-                  <span className="nav-badge-count">{result.misclassifications.length}</span>
-                )}
-              </button>
-            ))}
-          </nav>
-
-          {tab === "Overview" && (
+          {!result ? (
+            <section className="landing">
+              <p className="eyebrow">ZOHO BOOKS PURCHASE & P&L REVIEW</p>
+              <h2>Find what the spreadsheet misses.</h2>
+              <p className="lead">Compare two Zoho purchase exports to flag duplicate bills, account misclassifications, vendor movements, item variation, price exceptions, and explore your Account Head hierarchy.</p>
+              <div className="chips">
+                <b>Misclassification alerts</b>
+                <b>Account heads pivot</b>
+                <b>Duplicate bills</b>
+                <b>Vendor variation</b>
+                <b>Item variation</b>
+                <b>Price exceptions</b>
+              </div>
+              <div className="uploads">
+                <Upload title="Current month" help="Upload the latest Zoho export" file={current} onChange={f => upload(f, setCurrent)} />
+                <Upload title="Previous month" help="Upload the month to compare" file={previous} onChange={f => upload(f, setPrevious)} />
+              </div>
+              {error && <p className="error">{error}</p>}
+              <p className="note">Required: Bill Date and Vendor Name. Recommended: Account Name, Bill Number, Item Name, Quantity, Rate, Branch, and Item Total for full audit.</p>
+            </section>
+          ) : (
             <>
-              <section className="metrics">
-                <Card label="Audit findings" value={total} warm />
-                <Card label="Current-month spend" value={show(spend(current))} />
-                <Card label="Spend movement" value={show(spend(current) - spend(previous))} />
-                <Card label="Rows reviewed" value={current.records.length.toLocaleString("en-IN")} />
-              </section>
-              <section className="panel">
-                <div className="panelhead">
-                  <div>
-                    <p className="eyebrow">PRIORITY QUEUE</p>
-                    <h2>What to review first</h2>
-                  </div>
-                  <b className="badge">
-                    {result.misclassifications.length + result.duplicates.length} critical issues
-                  </b>
+              <section className="run">
+                <div>
+                  <strong>Analysis ready</strong>
+                  <small>{current.name} vs {previous.name}</small>
                 </div>
-                {result.misclassifications.length || result.duplicates.length || result.vendors.length || result.prices.length ? (
-                  <div className="queue">
-                    {[
-                      ...result.misclassifications.slice(0, 3).map(x => ({
-                        title: `Wrong Account: ${x.item}`,
-                        detail: `Booked in "${x.actualAccount}" → Should be "${x.suggestedAccount}"`,
-                        value: x.total,
-                        red: true
-                      })),
-                      ...result.duplicates.slice(0, 3).map(x => ({
-                        title: x.kind,
-                        detail: `${x.rows[0].vendor} - ${x.rows.length} matching lines`,
-                        value: x.total,
-                        red: x.risk === "Critical"
-                      })),
-                      ...result.vendors.slice(0, 2).map(x => ({
-                        title: `${x.status} vendor`,
-                        detail: x.label,
-                        value: x.diff
-                      })),
-                      ...result.prices.slice(0, 2).map(x => ({
-                        title: "High item price",
-                        detail: `${x.item} - ${x.vendor}`,
-                        value: x.total
-                      }))
-                    ].slice(0, 8).map((x, i) => (
-                      <div className="queueitem" key={i}>
-                        <i className={x.red ? "red" : "amber"} />
-                        <div><strong>{x.title}</strong><small>{x.detail}</small></div>
-                        <b>{show(x.value)}</b>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <Empty>No material flags found.</Empty>
-                )}
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="ai-setup-run-btn" onClick={() => setShowAiSetup(true)}>
+                    ⚙️ {groqModel ? `AI: ${groqModel}` : "Configure AI"}
+                  </button>
+                  <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
+                  <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
+                </div>
               </section>
+
+              <section className="thresholds">
+                <p className="eyebrow">SENSITIVITY THRESHOLDS</p>
+                <div className="thresh-row">
+                  <ThresholdInput label="Vendor variation" value={thresholds.vendor} onChange={v => setT("vendor", v)} />
+                  <ThresholdInput label="Item variation" value={thresholds.item} onChange={v => setT("item", v)} />
+                  <ThresholdInput label="Price exception" value={thresholds.price} onChange={v => setT("price", v)} maxVal={1000} />
+                  <button className="thresh-reset" onClick={() => setThresholds({ vendor: 20, item: 25, price: 20 })}>Reset to defaults</button>
+                </div>
+              </section>
+
+              <nav>
+                {["Overview", "Misclassifications", "Account heads", "Duplicate bills", "Vendor variation", "Purchase variation", "Price exceptions"].map(x => (
+                  <button className={tab === x ? "active" : ""} onClick={() => setTab(x)} key={x}>
+                    {x}
+                    {x === "Misclassifications" && result.misclassifications.length > 0 && (
+                      <span className="nav-badge-count">{result.misclassifications.length}</span>
+                    )}
+                  </button>
+                ))}
+              </nav>
+
+              {tab === "Overview" && (
+                <>
+                  <section className="metrics">
+                    <Card label="Audit findings" value={total} warm />
+                    <Card label="Current-month spend" value={show(spend(current))} />
+                    <Card label="Spend movement" value={show(spend(current) - spend(previous))} />
+                    <Card label="Rows reviewed" value={current.records.length.toLocaleString("en-IN")} />
+                  </section>
+                  <section className="panel">
+                    <div className="panelhead">
+                      <div>
+                        <p className="eyebrow">PRIORITY QUEUE</p>
+                        <h2>What to review first</h2>
+                      </div>
+                      <b className="badge">
+                        {result.misclassifications.length + result.duplicates.length} critical issues
+                      </b>
+                    </div>
+                    {result.misclassifications.length || result.duplicates.length || result.vendors.length || result.prices.length ? (
+                      <div className="queue">
+                        {[
+                          ...result.misclassifications.slice(0, 3).map(x => ({
+                            title: `Wrong Account: ${x.item}`,
+                            detail: `Booked in "${x.actualAccount}" → Should be "${x.suggestedAccount}"`,
+                            value: x.total,
+                            red: true
+                          })),
+                          ...result.duplicates.slice(0, 3).map(x => ({
+                            title: x.kind,
+                            detail: `${x.rows[0].vendor} - ${x.rows.length} matching lines`,
+                            value: x.total,
+                            red: x.risk === "Critical"
+                          })),
+                          ...result.vendors.slice(0, 2).map(x => ({
+                            title: `${x.status} vendor`,
+                            detail: x.label,
+                            value: x.diff
+                          })),
+                          ...result.prices.slice(0, 2).map(x => ({
+                            title: "High item price",
+                            detail: `${x.item} - ${x.vendor}`,
+                            value: x.total
+                          }))
+                        ].slice(0, 8).map((x, i) => (
+                          <div className="queueitem" key={i}>
+                            <i className={x.red ? "red" : "amber"} />
+                            <div><strong>{x.title}</strong><small>{x.detail}</small></div>
+                            <b>{show(x.value)}</b>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <Empty>No material flags found.</Empty>
+                    )}
+                  </section>
+                </>
+              )}
+
+              {tab === "Misclassifications" && (
+                <MisclassificationsView
+                  items={result.misclassifications}
+                  current={current}
+                  onGoToPivot={() => setTab("Account heads")}
+                  sharedApiKey={apiKey}
+                  sharedModel={groqModel}
+                  onOpenSetup={() => setShowAiSetup(true)}
+                  sharedAccounts={sharedAccounts}
+                />
+              )}
+
+              {tab === "Account heads" && <AccountPivot current={current} />}
+
+              {tab === "Duplicate bills" && (
+                <section className="panel">
+                  <Panel title="Duplicate bill patterns" badge={`${result.duplicates.length} findings`} />
+                  <Table head={["Classification", "Vendor", "Item", "Matching lines", "Exposure"]}>
+                    {result.duplicates.length ? result.duplicates.map((x, i) => (
+                      <Fragment key={i}>
+                        <tr>
+                          <td><b className={x.risk === "Critical" ? "pill critical" : "pill"}>{x.kind}</b></td>
+                          <td>{x.rows[0].vendor}</td>
+                          <td>{x.rows[0].item || "-"}</td>
+                          <td>{x.rows.length}</td>
+                          <td>{show(x.total)}</td>
+                        </tr>
+                        <tr>
+                          <td colSpan="5" style={{ padding: "0 0 10px 0", background: "var(--surface)" }}>
+                            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
+                              <thead>
+                                <tr style={{ background: "var(--border)" }}>
+                                  <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Bill No.</th>
+                                  <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Date</th>
+                                  <th style={{ padding: "5px 14px", textAlign: "right", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Amount</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {x.rows.map((r, j) => (
+                                  <tr key={j} style={{ borderBottom: "1px solid var(--border)" }}>
+                                    <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.bill || "—"}</td>
+                                    <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.date || "—"}</td>
+                                    <td style={{ padding: "5px 14px", textAlign: "right", color: x.risk === "Critical" ? "var(--red, #c0392b)" : "var(--text)", fontWeight: 500 }}>{show(r.total)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </td>
+                        </tr>
+                      </Fragment>
+                    )) : <tr><td colSpan="5"><Empty>No duplicate patterns found.</Empty></td></tr>}
+                  </Table>
+                  {result.duplicates.length > 0 && <CopyDuplicatesButton duplicates={result.duplicates} />}
+                </section>
+              )}
+
+              {tab === "Vendor variation" && <Changes title="Vendor variation" rows={result.vendors} field="Vendor" threshold={thresholds.vendor} />}
+              {tab === "Purchase variation" && <Changes title="Purchase variation" rows={result.items} field="Item" threshold={thresholds.item} />}
+
+              {tab === "Price exceptions" && (
+                <section className="panel">
+                  <Panel title="Items purchased above weighted average" badge={`${thresholds.price}%+ above average`} />
+                  <Table head={["Item", "Vendor", "Rate paid", "Weighted average", "Variance"]}>
+                    {result.prices.length ? result.prices.map((x, i) => (
+                      <tr key={i}>
+                        <td>{x.item}</td>
+                        <td>{x.vendor}</td>
+                        <td>{show(x.rate)}</td>
+                        <td>{show(x.avg)}</td>
+                        <td className="bad">+{(x.pct * 100).toFixed(0)}%</td>
+                      </tr>
+                    )) : <tr><td colSpan="5"><Empty>No price exceptions found.</Empty></td></tr>}
+                  </Table>
+                  {result.prices.length > 0 && <CopyPriceExceptionsButton prices={result.prices} />}
+                </section>
+              )}
             </>
           )}
-
-          {tab === "Misclassifications" && (
-            <MisclassificationsView
-              items={result.misclassifications}
-              current={current}
-              onGoToPivot={() => setTab("Account heads")}
-              sharedApiKey={apiKey}
-              sharedModel={groqModel}
-              onOpenSetup={() => setShowAiSetup(true)}
-              sharedAccounts={sharedAccounts}
-            />
-          )}
-
-          {tab === "Account heads" && <AccountPivot current={current} />}
-
-          {tab === "Duplicate bills" && (
-            <section className="panel">
-              <Panel title="Duplicate bill patterns" badge={`${result.duplicates.length} findings`} />
-              <Table head={["Classification", "Vendor", "Item", "Matching lines", "Exposure"]}>
-                {result.duplicates.length ? result.duplicates.map((x, i) => (
-                  <Fragment key={i}>
-                    <tr>
-                      <td><b className={x.risk === "Critical" ? "pill critical" : "pill"}>{x.kind}</b></td>
-                      <td>{x.rows[0].vendor}</td>
-                      <td>{x.rows[0].item || "-"}</td>
-                      <td>{x.rows.length}</td>
-                      <td>{show(x.total)}</td>
-                    </tr>
-                    <tr>
-                      <td colSpan="5" style={{ padding: "0 0 10px 0", background: "var(--surface)" }}>
-                        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.78rem" }}>
-                          <thead>
-                            <tr style={{ background: "var(--border)" }}>
-                              <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Bill No.</th>
-                              <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Date</th>
-                              <th style={{ padding: "5px 14px", textAlign: "right", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Amount</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {x.rows.map((r, j) => (
-                              <tr key={j} style={{ borderBottom: "1px solid var(--border)" }}>
-                                <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.bill || "—"}</td>
-                                <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.date || "—"}</td>
-                                <td style={{ padding: "5px 14px", textAlign: "right", color: x.risk === "Critical" ? "var(--red, #c0392b)" : "var(--text)", fontWeight: 500 }}>{show(r.total)}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </td>
-                    </tr>
-                  </Fragment>
-                )) : <tr><td colSpan="5"><Empty>No duplicate patterns found.</Empty></td></tr>}
-              </Table>
-              {result.duplicates.length > 0 && <CopyDuplicatesButton duplicates={result.duplicates} />}
-            </section>
-          )}
-
-          {tab === "Vendor variation" && <Changes title="Vendor variation" rows={result.vendors} field="Vendor" threshold={thresholds.vendor} />}
-          {tab === "Purchase variation" && <Changes title="Purchase variation" rows={result.items} field="Item" threshold={thresholds.item} />}
-
-          {tab === "Price exceptions" && (
-            <section className="panel">
-              <Panel title="Items purchased above weighted average" badge={`${thresholds.price}%+ above average`} />
-              <Table head={["Item", "Vendor", "Rate paid", "Weighted average", "Variance"]}>
-                {result.prices.length ? result.prices.map((x, i) => (
-                  <tr key={i}>
-                    <td>{x.item}</td>
-                    <td>{x.vendor}</td>
-                    <td>{show(x.rate)}</td>
-                    <td>{show(x.avg)}</td>
-                    <td className="bad">+{(x.pct * 100).toFixed(0)}%</td>
-                  </tr>
-                )) : <tr><td colSpan="5"><Empty>No price exceptions found.</Empty></td></tr>}
-              </Table>
-              {result.prices.length > 0 && <CopyPriceExceptionsButton prices={result.prices} />}
-            </section>
-          )}
         </>
+      ) : (
+        <SalesReconciliationView />
       )}
 
       {/* Data preview modal */}
@@ -1888,4 +1925,246 @@ function CopyPriceExceptionsButton({ prices }) {
     </div>
   );
 }
+
+
+
+function SalesReconciliationView() {
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState("");
+    const [classifiedFiles, setClassifiedFiles] = useState(null);
+    const [zomatoAudit, setZomatoAudit] = useState(null);
+    const [swiggyAudit, setSwiggyAudit] = useState(null);
+    const [copySuccess, setCopySuccess] = useState(null);
+
+    const handleFileUpload = async (file) => {
+      setLoading(true);
+      setError("");
+      try {
+        const extracted = await extractZipRecursively(file);
+        if (extracted.length === 0) {
+          throw new Error("No files found inside the uploaded zip archive.");
+        }
+
+        const classified = classifyDeliverableFiles(extracted);
+        setClassifiedFiles(classified);
+
+        const zAudit = auditZomatoReconciliation(
+          classified.zomatoRaw,
+          classified.pos,
+          classified.zomatoSummaries
+        );
+        const sAudit = auditSwiggyReconciliation(
+          classified.swiggyRaw,
+          classified.pos,
+          classified.swiggySummaries
+        );
+
+        setZomatoAudit(zAudit);
+        setSwiggyAudit(sAudit);
+      } catch (err) {
+        setError(err.message || "Failed to process zip deliverables.");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    const resetAudit = () => {
+      setClassifiedFiles(null);
+      setZomatoAudit(null);
+      setSwiggyAudit(null);
+      setError("");
+    };
+
+    const copyDiscrepancies = (audit, platformName) => {
+      const lines = [`${platformName.toUpperCase()} RECONCILIATION DISCREPANCY AUDIT`];
+      lines.push("=".repeat(80));
+      lines.push("");
+
+      audit.weeks.forEach(w => {
+        lines.push(`Period: ${w.label}`);
+        lines.push(`- Sales: Accountant: ${show(w.accountant.sales)} | Calculated: ${show(w.calculated.sales)} (POS: ${show(w.pos.sales)}) | Diff: ${show(w.discrepancy.sales)}`);
+        lines.push(`- Commission: Accountant: ${show(w.accountant.commission)} | Calculated: ${show(w.calculated.commission)} | Diff: ${show(w.discrepancy.commission)}`);
+        lines.push(`- Net Payout: Accountant: ${show(w.accountant.payout)} | Calculated: ${show(w.calculated.payout)} | Diff: ${show(w.discrepancy.payout)}`);
+        
+        const hasErr = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
+        lines.push(`Status: ${hasErr ? "⚠️ Discrepancy Found" : "✅ Match"}`);
+        lines.push("-".repeat(80));
+      });
+
+      lines.push(`Generated on ${new Date().toLocaleString("en-IN")}`);
+      navigator.clipboard.writeText(lines.join("\n")).then(() => {
+        setCopySuccess(platformName);
+        setTimeout(() => setCopySuccess(null), 2500);
+      });
+    };
+
+    if (loading) {
+      return (
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 300, background: "#fff", border: "1px solid var(--line)", padding: 40 }}>
+          <div style={{ border: "4px solid #f3f3f3", borderTop: "4px solid var(--forest)", borderRadius: "50%", width: 40, height: 40, animation: "spin 1s linear infinite" }} />
+          <strong style={{ marginTop: 20, color: "var(--forest)" }}>Analyzing Deliverables Folder...</strong>
+          <small style={{ color: "var(--muted)", marginTop: 8 }}>Extracting nested zips, classifying files, and running sales reconciliation math.</small>
+          <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+        </div>
+      );
+    }
+
+    if (zomatoAudit || swiggyAudit) {
+      const totalDiscrepancies = 
+        (zomatoAudit?.weeks.filter(w => w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0).length || 0) +
+        (swiggyAudit?.weeks.filter(w => w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0).length || 0);
+
+      return (
+        <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+          <section className="run" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--forest)", color: "#fff", padding: "16px 18px" }}>
+            <div>
+              <strong>Sales Reconciliation Audit Completed</strong>
+              <small>POS, Swiggy, and Zomato files cross-checked against accountant summary sheets</small>
+            </div>
+            <button onClick={resetAudit} style={{ border: "1px solid #77978a", background: "transparent", color: "#fff", padding: "9px 12px", cursor: "pointer" }}>Start New Audit</button>
+          </section>
+
+          <section className="metrics" style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 14 }}>
+            <Card label="Discrepancies Found" value={totalDiscrepancies} warm={totalDiscrepancies > 0} />
+            <Card label="POS Reports Loaded" value={classifiedFiles?.pos.length || "0"} />
+            <Card label="Zomato Raw Invoices" value={classifiedFiles?.zomatoRaw.length || "0"} />
+            <Card label="Swiggy Raw Invoices" value={classifiedFiles?.swiggyRaw.length || "0"} />
+          </section>
+
+          {zomatoAudit && zomatoAudit.weeks.length > 0 && (
+            <section className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
+              <div className="panelhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 24 }}>
+                <div>
+                  <p className="eyebrow">ZOMATO RECONCILIATION AUDIT</p>
+                  <h2>Zomato Summary Verification</h2>
+                </div>
+                <button className="pivot-btn" onClick={() => copyDiscrepancies(zomatoAudit, "Zomato")}>
+                  {copySuccess === "Zomato" ? "✓ Copied!" : "📋 Copy Audit Notes"}
+                </button>
+              </div>
+
+              <div className="table" style={{ overflowX: "auto", borderTop: "1px solid var(--line)" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#fafcf9" }}>
+                      <th style={{ padding: "12px 18px", textAlign: "left" }}>Week</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Sales</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Sales (POS)</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Comm.</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Comm.</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Payout</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Payout</th>
+                      <th style={{ padding: "12px 18px", textAlign: "center" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {zomatoAudit.weeks.map((w, idx) => {
+                      const hasErr = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
+                      return (
+                        <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
+                          <td style={{ padding: "14px 18px", fontWeight: "600" }}>{w.label}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.sales)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.sales !== 0 ? "var(--red)" : "inherit" }}>
+                            {show(w.calculated.sales)} {w.pos.sales > 0 && <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>(POS: {show(w.pos.sales)})</span>}
+                          </td>
+                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.commission)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.commission !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.commission)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.payout)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.payout !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.payout)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "center" }}>
+                            <span className={`pill ${hasErr ? "critical" : ""}`} style={{ background: hasErr ? "#feeceb" : "#edf8f0", color: hasErr ? "#a43024" : "#1a6f3b", padding: "4px 8px", borderRadius: 4, fontSize: "11px", fontWeight: "600" }}>
+                              {hasErr ? "Discrepancy" : "Match"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+
+          {swiggyAudit && swiggyAudit.weeks.length > 0 && (
+            <section className="panel" style={{ background: "#fff", border: "1px solid var(--line)" }}>
+              <div className="panelhead" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: 24 }}>
+                <div>
+                  <p className="eyebrow">SWIGGY RECONCILIATION AUDIT</p>
+                  <h2>Swiggy Summary Verification</h2>
+                </div>
+                <button className="pivot-btn" onClick={() => copyDiscrepancies(swiggyAudit, "Swiggy")}>
+                  {copySuccess === "Swiggy" ? "✓ Copied!" : "📋 Copy Audit Notes"}
+                </button>
+              </div>
+
+              <div className="table" style={{ overflowX: "auto", borderTop: "1px solid var(--line)" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ background: "#fafcf9" }}>
+                      <th style={{ padding: "12px 18px", textAlign: "left" }}>Week</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Sales</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Sales (POS)</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Comm.</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Comm.</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Accountant Payout</th>
+                      <th style={{ padding: "12px 18px", textAlign: "right" }}>Calculated Payout</th>
+                      <th style={{ padding: "12px 18px", textAlign: "center" }}>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {swiggyAudit.weeks.map((w, idx) => {
+                      const hasErr = w.discrepancy.sales !== 0 || w.discrepancy.commission !== 0 || w.discrepancy.payout !== 0;
+                      return (
+                        <tr key={idx} style={{ borderBottom: "1px solid var(--line)" }}>
+                          <td style={{ padding: "14px 18px", fontWeight: "600" }}>{w.label}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.sales)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.sales !== 0 ? "var(--red)" : "inherit" }}>
+                            {show(w.calculated.sales)} {w.pos.sales > 0 && <span style={{ fontSize: "11px", color: "var(--muted)", display: "block" }}>(POS: {show(w.pos.sales)})</span>}
+                          </td>
+                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.commission)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.commission !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.commission)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right" }}>{show(w.accountant.payout)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "right", color: w.discrepancy.payout !== 0 ? "var(--red)" : "inherit" }}>{show(w.calculated.payout)}</td>
+                          <td style={{ padding: "14px 18px", textAlign: "center" }}>
+                            <span className={`pill ${hasErr ? "critical" : ""}`} style={{ background: hasErr ? "#feeceb" : "#edf8f0", color: hasErr ? "#a43024" : "#1a6f3b", padding: "4px 8px", borderRadius: 4, fontSize: "11px", fontWeight: "600" }}>
+                              {hasErr ? "Discrepancy" : "Match"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <section className="landing">
+        <p className="eyebrow">AUTOMATED RECONCILIATION VERIFIER</p>
+        <h2>Audit Deliverables Zip File</h2>
+        <p className="lead">Upload the zipped deliverables directory. The tool will recursively unzip, sort the aggregator invoices, POS sales reports, and accountant summaries, then check for mismatch errors.</p>
+        
+        <div style={{ marginTop: 32 }}>
+          <label className="upload" style={{ minHeight: 240, border: "1px dashed var(--line)" }}>
+            <input 
+              type="file" 
+              accept=".zip" 
+              onChange={e => e.target.files[0] && handleFileUpload(e.target.files[0])} 
+            />
+            <span style={{ background: "var(--lime)" }}>↑</span>
+            <strong>Upload Deliverables Zip</strong>
+            <small>Drop your zip file containing POS, zomato, swiggy, and summary files</small>
+            <em>Select Zip Archive</em>
+          </label>
+        </div>
+
+        {error && <p className="error" style={{ color: "var(--red)", marginTop: 16 }}>{error}</p>}
+      </section>
+    );
+  }
+
 
