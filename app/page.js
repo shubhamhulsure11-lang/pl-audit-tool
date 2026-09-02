@@ -2093,17 +2093,28 @@ function SalesReconciliationView() {
   const [lStart, setLStart] = useState(29);
   const [lEnd, setLEnd] = useState(31);
 
-  // Uploaded files states
-  const [invoiceFiles, setInvoiceFiles] = useState([]);
-  const [bankFile, setBankFile] = useState(null);
-  const [adsFiles, setAdsFiles] = useState([]);
-  const [posFile, setPosFile] = useState(null);
-  const [zipFile, setZipFile] = useState(null);
+  // Per-platform result reports
+  const [platformReports, setPlatformReports] = useState({
+    zomato: null,
+    swiggy: null,
+    dineout: null,
+    zpay: null,
+    paytm: null,
+    pos: null,
+    zip: null,
+  });
 
-  // Result reports
-  const [report, setReport] = useState(null);
-  const [posReport, setPosReport] = useState(null);
-  const [zipReport, setZipReport] = useState(null);
+  // Per-platform uploaded files
+  const [platformFiles, setPlatformFiles] = useState({
+    zomato: { invoiceFiles: [], bankFile: null },
+    swiggy: { invoiceFiles: [], bankFile: null },
+    dineout: { invoiceFiles: [], bankFile: null },
+    zpay: { invoiceFiles: [], bankFile: null, adsFiles: [] },
+    paytm: { invoiceFiles: [], bankFile: null },
+    pos: { posFile: null },
+    zip: { zipFile: null },
+  });
+
   const [copySuccess, setCopySuccess] = useState("");
 
   const months = [
@@ -2111,24 +2122,58 @@ function SalesReconciliationView() {
     "July", "August", "September", "October", "November", "December"
   ];
 
-  const resetAll = () => {
-    setReport(null);
-    setPosReport(null);
-    setZipReport(null);
+  // Active state for the currently selected platform
+  const currentReport = platformReports[platform];
+  const currentFiles = platformFiles[platform] || {};
+  const invoiceFiles = currentFiles.invoiceFiles || [];
+  const bankFile = currentFiles.bankFile || null;
+  const adsFiles = currentFiles.adsFiles || [];
+  const posFile = currentFiles.posFile || null;
+  const zipFile = currentFiles.zipFile || null;
+
+  const setInvoiceFiles = (files) => {
+    setPlatformFiles((prev) => ({
+      ...prev,
+      [platform]: { ...(prev[platform] || {}), invoiceFiles: files },
+    }));
+  };
+
+  const setBankFile = (file) => {
+    setPlatformFiles((prev) => ({
+      ...prev,
+      [platform]: { ...(prev[platform] || {}), bankFile: file },
+    }));
+  };
+
+  const setAdsFiles = (files) => {
+    setPlatformFiles((prev) => ({
+      ...prev,
+      [platform]: { ...(prev[platform] || {}), adsFiles: files },
+    }));
+  };
+
+  const setPosFile = (file) => {
+    setPlatformFiles((prev) => ({
+      ...prev,
+      pos: { ...(prev.pos || {}), posFile: file },
+    }));
+  };
+
+  const setZipFile = (file) => {
+    setPlatformFiles((prev) => ({
+      ...prev,
+      zip: { ...(prev.zip || {}), zipFile: file },
+    }));
+  };
+
+  const resetCurrentPlatform = () => {
+    setPlatformReports((prev) => ({ ...prev, [platform]: null }));
     setError("");
-    setInvoiceFiles([]);
-    setBankFile(null);
-    setAdsFiles([]);
-    setPosFile(null);
-    setZipFile(null);
   };
 
   const handleExecute = async () => {
     setLoading(true);
     setError("");
-    setReport(null);
-    setPosReport(null);
-    setZipReport(null);
 
     try {
       if (platform === "pos") {
@@ -2140,7 +2185,7 @@ function SalesReconciliationView() {
           lastWeekStart: lStart,
           lastWeekEnd: lEnd,
         });
-        setPosReport(res);
+        setPlatformReports((prev) => ({ ...prev, pos: res }));
       } else if (platform === "zip") {
         if (!zipFile) throw new Error("Please upload a deliverables .zip archive");
         const extracted = await extractZipRecursively(zipFile);
@@ -2148,7 +2193,7 @@ function SalesReconciliationView() {
         const classified = classifyDeliverableFiles(extracted);
         const zAudit = auditZomatoReconciliation(classified.zomatoRaw, classified.pos, classified.zomatoSummaries);
         const sAudit = auditSwiggyReconciliation(classified.swiggyRaw, classified.pos, classified.swiggySummaries);
-        setZipReport({ classified, zomato: zAudit, swiggy: sAudit });
+        setPlatformReports((prev) => ({ ...prev, zip: { classified, zomato: zAudit, swiggy: sAudit } }));
       } else {
         if (invoiceFiles.length === 0) {
           throw new Error(`Please upload at least one ${platform.toUpperCase()} invoice/settlement file`);
@@ -2178,7 +2223,7 @@ function SalesReconciliationView() {
           res = await runPaytmRecon(opts);
         }
 
-        setReport(res);
+        setPlatformReports((prev) => ({ ...prev, [platform]: res }));
       }
     } catch (err) {
       console.error(err);
@@ -2189,6 +2234,7 @@ function SalesReconciliationView() {
   };
 
   const copyTsv = () => {
+    const report = currentReport;
     if (!report) return;
     const lines = [];
     lines.push([`Client: ${report.clientName}`, `Platform: ${report.platform}`, `Month: ${report.month}`].join("\t"));
@@ -2261,6 +2307,7 @@ function SalesReconciliationView() {
   };
 
   const copyNotes = () => {
+    const report = currentReport;
     if (!report) return;
     const lines = [
       `=======================================================`,
@@ -2308,33 +2355,53 @@ function SalesReconciliationView() {
     { id: "zip", label: "Deliverables Zip", icon: "📦", desc: "Full Auto Audit Archive" },
   ];
 
+  const report = platform !== "pos" && platform !== "zip" ? currentReport : null;
+  const posReport = platform === "pos" ? currentReport : null;
+  const zipReport = platform === "zip" ? currentReport : null;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, paddingBottom: 60 }}>
       {/* Sub-Tabs Selector */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, background: "var(--surface)", padding: 6, borderRadius: 12, border: "1px solid var(--line)" }}>
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => { setPlatform(t.id); resetAll(); }}
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              padding: "10px 18px",
-              borderRadius: 8,
-              border: platform === t.id ? "1px solid var(--forest)" : "1px solid transparent",
-              background: platform === t.id ? "var(--forest)" : "transparent",
-              color: platform === t.id ? "#fff" : "var(--text)",
-              fontWeight: 600,
-              fontSize: "0.84rem",
-              cursor: "pointer",
-              transition: "0.15s",
-            }}
-          >
-            <span>{t.icon}</span>
-            <span>{t.label}</span>
-          </button>
-        ))}
+        {tabs.map((t) => {
+          const hasReport = !!platformReports[t.id];
+          return (
+            <button
+              key={t.id}
+              onClick={() => { setPlatform(t.id); setError(""); }}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                padding: "10px 18px",
+                borderRadius: 8,
+                border: platform === t.id ? "1px solid var(--forest)" : "1px solid transparent",
+                background: platform === t.id ? "var(--forest)" : "transparent",
+                color: platform === t.id ? "#fff" : "var(--text)",
+                fontWeight: 600,
+                fontSize: "0.84rem",
+                cursor: "pointer",
+                transition: "0.15s",
+              }}
+            >
+              <span>{t.icon}</span>
+              <span>{t.label}</span>
+              {hasReport && (
+                <span style={{
+                  background: platform === t.id ? "var(--lime)" : "#27ae60",
+                  color: platform === t.id ? "var(--forest)" : "#fff",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                  padding: "1px 6px",
+                  borderRadius: 10,
+                  marginLeft: 4,
+                }}>
+                  ✓
+                </span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Loading View */}
@@ -2369,7 +2436,7 @@ function SalesReconciliationView() {
               <button onClick={() => exportFullReconWorkbook(report)} style={{ background: "var(--lime)", border: "1px solid var(--lime)", color: "var(--forest)", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: "0.82rem" }}>
                 📊 Full Report (Summary / Cashflow / Profit / Discrepancies)
               </button>
-              <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}>
+              <button onClick={resetCurrentPlatform} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600, fontSize: "0.82rem" }}>
                 🔄 Start New Recon
               </button>
             </div>
@@ -2587,7 +2654,7 @@ function SalesReconciliationView() {
               <strong style={{ fontSize: "1.2rem" }}>POS Sales Channel Breakdown</strong>
               <small style={{ display: "block", opacity: 0.8, marginTop: 4 }}>File: {posReport.fileName} · Total Extracted: {show(posReport.grandTotal)}</small>
             </div>
-            <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+            <button onClick={resetCurrentPlatform} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
               🔄 New POS Extraction
             </button>
           </section>
@@ -2646,7 +2713,7 @@ function SalesReconciliationView() {
                 {zipReport.classified.swiggyRaw.length} Swiggy · {zipReport.classified.zomatoRaw.length} Zomato · {zipReport.classified.pos.length} POS Files Cross-Checked
               </small>
             </div>
-            <button onClick={resetAll} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
+            <button onClick={resetCurrentPlatform} style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", padding: "8px 14px", borderRadius: 6, cursor: "pointer", fontWeight: 600 }}>
               🔄 Audit Another Zip
             </button>
           </section>
@@ -2747,8 +2814,8 @@ function SalesReconciliationView() {
         </div>
       )}
 
-      {/* Input Form (When no report is active) */}
-      {!loading && !report && !posReport && !zipReport && (
+      {/* Input Form (When no report is active for current platform) */}
+      {!loading && !currentReport && (
         <div style={{ background: "#fff", borderRadius: 12, border: "1px solid var(--line)", padding: 32 }}>
           <div style={{ marginBottom: 28 }}>
             <p className="eyebrow" style={{ color: "var(--forest)", fontWeight: 700, letterSpacing: "0.1em" }}>
