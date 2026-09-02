@@ -625,6 +625,9 @@ export async function runSwiggyRecon({
   const weekRanges = generateWeekRanges(firstWeekStart, firstWeekEnd, lastWeekStart, lastWeekEnd);
   const bankTxs = await parseBankTransactions(bankFile);
 
+  // Swiggy fee columns in their settlement report are already GST-inclusive
+  // (unlike Zomato where the raw column values are pre-GST and need × 1.18).
+
   const weekDataMap = {};
   weekRanges.forEach((w) => {
     weekDataMap[w.weekNum] = {
@@ -632,20 +635,21 @@ export async function runSwiggyRecon({
       orders: 0,
       itemTotal: 0,
       packagingCharges: 0,
-      compensationCancelled: 0,
       discounts: 0,
       gstCollected: 0,
-      platformFee: 0,
+      platformFee: 0,       // Commission — already incl. 18% GST in Swiggy report
       callCenterFee: 0,
       swiggyOneFee: 0,
       pocketHeroFee: 0,
       longDistanceFee: 0,
-      cancellationCharges: 0,
-      customerComplaints: 0,
-      tcs: 0,
-      tds: 0,
-      gstDeduction: 0,
       collectionCharges: 0,
+      // Net compensation: total customer paid − complaint & cancellation charges
+      compensationCancelled: 0,
+      cancellationCharges: 0,
+      customerComplaints: 0,   // Paid by restaurant
+      tds: 0,
+      tcs: 0,
+      gstDeduction: 0,         // GST collected & paid by Swiggy (≡ gstPaidByZomato)
       marketingAds: 0,
       utrList: [],
     };
@@ -682,19 +686,19 @@ export async function runSwiggyRecon({
         const targetWeek = findWeekForDay(orderDay, weekRanges);
         const wData = weekDataMap[targetWeek.weekNum];
 
-        const status = getRowString(r, ["order status", "status"]).toLowerCase();
-        if (status && !status.includes("delivered") && !status.includes("cancelled")) {
-          // skip non-orders if applicable
+        const status = getRowString(r, ["order status", "status"]).toUpperCase();
+        const isDelivered = status === "DELIVERED" || status === "COMPLETED" || status === "";
+        const isCancelled = status.includes("CANCEL");
+
+        if (isDelivered || isCancelled) {
+          wData.orders += 1;
+        } else if (!status) {
+          wData.orders += 1; // count rows with no status field
         }
 
-        wData.orders += 1;
+        // All order rows contribute to totals (matches Swiggy's own aggregation)
         wData.itemTotal += getRowVal(r, ["item total", "order total", "bill amount"]);
-        wData.packagingCharges += getRowVal(r, ["packaging charges", "packing charges"]);
-        wData.compensationCancelled += getRowVal(r, [
-          "total customer paid",
-          "complaint & cancellation charges",
-          "compensation",
-        ]);
+        wData.packagingCharges += getRowVal(r, ["packaging charges", "packing charges", "packing charge"]);
         wData.discounts += getRowVal(r, [
           "restaurant discounts",
           "restaurant discount",
@@ -702,17 +706,26 @@ export async function runSwiggyRecon({
           "discount",
         ]);
         wData.gstCollected += getRowVal(r, ["gst collected", "gst"]);
+
+        // Fee columns — incl. GST in Swiggy format, no gross-up needed
         wData.platformFee += getRowVal(r, ["commission", "platform fee"]);
         wData.callCenterFee += getRowVal(r, ["call center charges", "call center fees"]);
         wData.swiggyOneFee += getRowVal(r, ["swiggy one fees"]);
         wData.pocketHeroFee += getRowVal(r, ["pocket hero fees"]);
         wData.longDistanceFee += getRowVal(r, ["long distance charges"]);
+        wData.collectionCharges += getRowVal(r, ["payment collection charges", "collection charges"]);
         wData.cancellationCharges += getRowVal(r, ["restaurant cancellation charges"]);
         wData.customerComplaints += getRowVal(r, ["customer complaints"]);
+
+        // Net compensation: Total Customer Paid − Complaint & Cancellation Charges
+        const totalCustomerPaid = getRowVal(r, ["total customer paid"]);
+        const complaintCancellation = getRowVal(r, ["complaint & cancellation charges", "complaint cancellation"]);
+        wData.compensationCancelled += (totalCustomerPaid - complaintCancellation);
+
+        // Tax lines
         wData.tds += getRowVal(r, ["tds"]);
         wData.tcs += getRowVal(r, ["tcs"]);
-        wData.gstDeduction += getRowVal(r, ["gst deduction", "gst liability"]);
-        wData.collectionCharges += getRowVal(r, ["payment collection charges", "collection charges"]);
+        wData.gstDeduction += getRowVal(r, ["gst deduction", "gst liability", "gst paid by swiggy"]);
 
         const utr = getRowString(r, ["bank utr", "utr", "ctr"]);
         if (utr && !wData.utrList.includes(utr)) {
@@ -726,57 +739,119 @@ export async function runSwiggyRecon({
 
   const weeks = weekRanges.map((w) => {
     const d = weekDataMap[w.weekNum];
-    const totalIncome = d.itemTotal + d.packagingCharges + d.compensationCancelled;
-    const commission =
-      d.platformFee +
-      d.callCenterFee +
-      d.swiggyOneFee +
-      d.pocketHeroFee +
-      d.longDistanceFee +
-      d.collectionCharges;
-    const taxesAndDeductions =
-      d.discounts +
-      d.cancellationCharges +
-      d.customerComplaints +
-      d.tds +
-      d.tcs +
-      d.gstDeduction;
-    const moneyReceived = Math.max(0, totalIncome + d.gstCollected - commission - taxesAndDeductions);
 
-    const bankCheck = matchBankPayout(moneyReceived, bankTxs);
+    // Income
+    const grossSales = d.itemTotal + d.packagingCharges;
+    const discounts = d.discounts;
+    const netSalesExclGst = Math.max(0, grossSales - discounts);
+    const gstCollected = d.gstCollected;
+    const netSales = netSalesExclGst + gstCollected; // = Total Income on Swiggy dashboard
+    const compensation = d.compensationCancelled;
+
+    // Commission — all platform fees (already GST inclusive in Swiggy report)
+    const commission = d.platformFee + d.callCenterFee + d.swiggyOneFee + d.pocketHeroFee + d.longDistanceFee + d.collectionCharges;
+
+    // Deductions
+    const cancellationCharges = d.cancellationCharges;
+    const customerComplaints = d.customerComplaints;
+    const tds = d.tds;
+    const tcs = d.tcs;
+    const gstPaidBySwiggy = d.gstDeduction;
+    const taxAdjustments = tds + tcs;
+    const otherDeductions = cancellationCharges + customerComplaints + taxAdjustments + gstPaidBySwiggy + d.marketingAds;
+
+    // Profit from Swiggy (mirrors Zomato's profitFromZomato logic)
+    const profitFromSwiggy = Math.max(
+      0,
+      netSales + compensation - commission - customerComplaints - cancellationCharges - gstPaidBySwiggy - d.marketingAds
+    );
+
+    // Commissionable amount = item sales − discounts
+    const commissionableAmount = d.itemTotal - discounts;
+
+    // Total Income for profit statement (mirrors reference tool's definition)
+    const totalIncomeProfitStmt = d.itemTotal + d.packagingCharges + gstCollected - discounts - gstPaidBySwiggy;
+    const netSalesNumerize = totalIncomeProfitStmt + compensation;
+
+    // Expected payout
+    const expectedPayout = Math.max(0, netSales + compensation - commission - otherDeductions);
+
+    const bankCheck = matchBankPayout(expectedPayout, bankTxs);
 
     return {
       weekNum: w.weekNum,
       label: w.label,
       orders: d.orders,
-      totalIncome,
+      // Detailed fields for the 4-sheet workbook export
+      itemSales: d.itemTotal,
       packagingCharges: d.packagingCharges,
-      discounts: d.discounts,
-      gstCollected: d.gstCollected,
+      compensation,
+      discounts,
+      gstCollected,
+      grossSales,
+      netSalesExclGst,
+      netSales,
       commission,
-      otherCharges: d.callCenterFee + d.swiggyOneFee + d.longDistanceFee + d.collectionCharges,
-      taxesAndDeductions,
-      expectedPayout: moneyReceived,
+      platformFee: d.platformFee,
+      callCenterFee: d.callCenterFee,
+      swiggyOneFee: d.swiggyOneFee,
+      pocketHeroFee: d.pocketHeroFee,
+      longDistanceFee: d.longDistanceFee,
+      collectionCharges: d.collectionCharges,
+      cancellationCharges,
+      customerComplaints,
+      tds,
+      tcs,
+      gstPaidBySwiggy,
+      taxAdjustments,
+      otherDeductions,
+      profitFromSwiggy,
+      commissionableAmount,
+      totalIncomeProfitStmt,
+      netSalesNumerize,
+      marketingAds: d.marketingAds,
+      expectedPayout,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
-      bankDiff: bankCheck.matched ? bankCheck.diff : -moneyReceived,
+      bankDiff: bankCheck.matched ? bankCheck.diff : -expectedPayout,
       bankMatched: bankCheck.matched,
       utr: d.utrList.join(", ") || "—",
     };
   });
 
+  const sum = (key) => weeks.reduce((s, w) => s + (w[key] || 0), 0);
   const total = {
     label: "Total",
-    orders: weeks.reduce((s, w) => s + w.orders, 0),
-    totalIncome: weeks.reduce((s, w) => s + w.totalIncome, 0),
-    packagingCharges: weeks.reduce((s, w) => s + w.packagingCharges, 0),
-    discounts: weeks.reduce((s, w) => s + w.discounts, 0),
-    gstCollected: weeks.reduce((s, w) => s + w.gstCollected, 0),
-    commission: weeks.reduce((s, w) => s + w.commission, 0),
-    otherCharges: weeks.reduce((s, w) => s + w.otherCharges, 0),
-    taxesAndDeductions: weeks.reduce((s, w) => s + w.taxesAndDeductions, 0),
-    expectedPayout: weeks.reduce((s, w) => s + w.expectedPayout, 0),
-    bankActual: weeks.reduce((s, w) => s + w.bankActual, 0),
-    bankDiff: weeks.reduce((s, w) => s + w.bankDiff, 0),
+    orders: sum("orders"),
+    itemSales: sum("itemSales"),
+    packagingCharges: sum("packagingCharges"),
+    compensation: sum("compensation"),
+    discounts: sum("discounts"),
+    gstCollected: sum("gstCollected"),
+    grossSales: sum("grossSales"),
+    netSalesExclGst: sum("netSalesExclGst"),
+    netSales: sum("netSales"),
+    commission: sum("commission"),
+    platformFee: sum("platformFee"),
+    callCenterFee: sum("callCenterFee"),
+    swiggyOneFee: sum("swiggyOneFee"),
+    pocketHeroFee: sum("pocketHeroFee"),
+    longDistanceFee: sum("longDistanceFee"),
+    collectionCharges: sum("collectionCharges"),
+    cancellationCharges: sum("cancellationCharges"),
+    customerComplaints: sum("customerComplaints"),
+    tds: sum("tds"),
+    tcs: sum("tcs"),
+    gstPaidBySwiggy: sum("gstPaidBySwiggy"),
+    taxAdjustments: sum("taxAdjustments"),
+    otherDeductions: sum("otherDeductions"),
+    profitFromSwiggy: sum("profitFromSwiggy"),
+    commissionableAmount: sum("commissionableAmount"),
+    totalIncomeProfitStmt: sum("totalIncomeProfitStmt"),
+    netSalesNumerize: sum("netSalesNumerize"),
+    marketingAds: sum("marketingAds"),
+    expectedPayout: sum("expectedPayout"),
+    bankActual: sum("bankActual"),
+    bankDiff: sum("bankDiff"),
     bankMatched: weeks.every((w) => w.bankMatched),
     utr: "—",
   };
@@ -808,26 +883,21 @@ export async function runDineoutRecon({
   const weekRanges = generateWeekRanges(firstWeekStart, firstWeekEnd, lastWeekStart, lastWeekEnd);
   const bankTxs = await parseBankTransactions(bankFile);
 
+  // Dineout settlement report: Order Total is incl. 5% GST.
+  // Per Python reference: orderTotalExclGst = orderTotalInclGst × (100/105)
   const weekDataMap = {};
   weekRanges.forEach((w) => {
     weekDataMap[w.weekNum] = {
       week: w,
-      salesExclGst: 0,
-      discounts: 0,
-      excessPaymentAdjustments: 0,
-      packagingServiceCharges: 0,
-      tips: 0,
-      platformFee: 0,
+      orderTotalInclGst: 0,   // Raw Order Total from settlement (incl. 5% GST)
+      discountInclGst: 0,     // Total merchant discount (incl. GST)
+      serviceFee: 0,
       discountOnServiceFee: 0,
-      accessCharges: 0,
-      callCenterFee: 0,
-      longDistanceFee: 0,
-      bannerAdsFee: 0,
-      deliveryServiceFee: 0,
       collectionCharges: 0,
+      ads: 0,
+      tips: 0,
       tds: 0,
       tcs: 0,
-      netSettlement: 0,
     };
   });
 
@@ -835,23 +905,34 @@ export async function runDineoutRecon({
     try {
       const wb = await readWorkbookFromFile(file);
       const sheet = findSheetByPattern(wb, ["dineout", "orders", "sheet1", "summary"]);
-      const rows = sheetToRows(sheet, 1);
+
+      let headerRowIdx = 1;
+      const rawGrid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      for (let i = 0; i < Math.min(15, rawGrid.length); i++) {
+        const rowStr = (rawGrid[i] || []).join(" ").toLowerCase();
+        if (rowStr.includes("order total") || rowStr.includes("bill amount") || rowStr.includes("date")) {
+          headerRowIdx = i + 1;
+          break;
+        }
+      }
+      const rows = sheetToRows(sheet, headerRowIdx);
 
       for (const r of rows) {
-        const dateStr = getRowString(r, ["date", "transaction date", "bill date"]);
+        const dateStr = getRowString(r, ["date", "transaction date", "bill date", "order date"]);
         const day = parseDayFromDate(dateStr) || parseDayFromDate(file.name) || 1;
         const targetWeek = findWeekForDay(day, weekRanges);
         const wData = weekDataMap[targetWeek.weekNum];
 
-        wData.salesExclGst += getRowVal(r, ["sales", "bill amount", "gross amount", "subtotal"]);
-        wData.discounts += getRowVal(r, ["discount", "merchant discount", "dineout discount"]);
+        // Order Total in Dineout = incl. GST; we extract excl-GST via ÷ 1.05 below
+        wData.orderTotalInclGst += getRowVal(r, ["order total", "bill amount", "gross amount", "subtotal", "sales"]);
+        wData.discountInclGst += getRowVal(r, ["total merchant discount", "merchant discount", "discount", "dineout discount"]);
+        wData.serviceFee += getRowVal(r, ["platform service fee", "commission", "service fee"]);
+        wData.discountOnServiceFee += getRowVal(r, ["discount on swiggy service fee", "discount on service fee", "service fee discount"]);
+        wData.collectionCharges += getRowVal(r, ["collection charges", "payment gateway fee", "payment collection charges"]);
         wData.tips += getRowVal(r, ["tip", "tips"]);
-        wData.platformFee += getRowVal(r, ["platform service fee", "commission", "service fee"]);
-        wData.discountOnServiceFee += getRowVal(r, ["discount on swiggy service fee", "service fee discount"]);
-        wData.collectionCharges += getRowVal(r, ["collection charges", "payment gateway fee"]);
+        wData.ads += getRowVal(r, ["ads", "advertising", "banner ads"]);
         wData.tds += getRowVal(r, ["tds"]);
         wData.tcs += getRowVal(r, ["tcs"]);
-        wData.netSettlement += getRowVal(r, ["net settlement", "settlement amount", "payout"]);
       }
     } catch (e) {
       console.warn("Error parsing Dineout file:", file.name, e);
@@ -860,34 +941,46 @@ export async function runDineoutRecon({
 
   const weeks = weekRanges.map((w) => {
     const d = weekDataMap[w.weekNum];
-    const salesAfterDiscounts = Math.max(0, d.salesExclGst - d.discounts - d.excessPaymentAdjustments);
+
+    // Per Python reference: order_total * 100/105 = excl-GST amount
+    const orderTotalExclGst = d.orderTotalInclGst * (100.0 / 105.0);
+    const discountExclGst = d.discountInclGst * (100.0 / 105.0);
+    const salesAfterDiscounts = Math.max(0, orderTotalExclGst - discountExclGst);
     const gst5Pct = salesAfterDiscounts * 0.05;
-    const salesInclGst = salesAfterDiscounts + gst5Pct + d.packagingServiceCharges + d.tips;
-    const totalCommission = Math.max(
-      0,
-      d.platformFee -
-        d.discountOnServiceFee +
-        d.accessCharges +
-        d.callCenterFee +
-        d.longDistanceFee +
-        d.bannerAdsFee +
-        d.deliveryServiceFee +
-        d.collectionCharges
-    );
-    const expectedPayout = Math.max(0, salesInclGst - totalCommission - d.tds - d.tcs);
+    const salesInclGst = salesAfterDiscounts + gst5Pct + d.tips;
+
+    // Commission = service fee − discount on service fee + collection charges
+    const commission = Math.max(0, d.serviceFee - d.discountOnServiceFee + d.collectionCharges);
+    const tds = d.tds;
+    const tcs = d.tcs;
+    const tdsTcs = tds + tcs;
+
+    // Profit and expected payout
+    const profitFromDineout = Math.max(0, salesInclGst - commission - d.ads - tdsTcs);
+    const expectedPayout = profitFromDineout;
 
     const bankCheck = matchBankPayout(expectedPayout, bankTxs);
 
     return {
       weekNum: w.weekNum,
       label: w.label,
-      salesExclGst: d.salesExclGst,
-      discounts: d.discounts,
+      orderTotalInclGst: d.orderTotalInclGst,
+      orderTotalExclGst,
+      discountExclGst,
       salesAfterDiscounts,
+      salesExclGst: salesAfterDiscounts,   // alias for generic table display
       gst5Pct,
+      tips: d.tips,
       salesInclGst,
-      commission: totalCommission,
-      tdsTcs: d.tds + d.tcs,
+      serviceFee: d.serviceFee,
+      discountOnServiceFee: d.discountOnServiceFee,
+      collectionCharges: d.collectionCharges,
+      commission,
+      ads: d.ads,
+      tds,
+      tcs,
+      tdsTcs,
+      profitFromDineout,
       expectedPayout,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
       bankDiff: bankCheck.matched ? bankCheck.diff : -expectedPayout,
@@ -895,18 +988,29 @@ export async function runDineoutRecon({
     };
   });
 
+  const sum = (key) => weeks.reduce((s, w) => s + (w[key] || 0), 0);
   const total = {
     label: "Total",
-    salesExclGst: weeks.reduce((s, w) => s + w.salesExclGst, 0),
-    discounts: weeks.reduce((s, w) => s + w.discounts, 0),
-    salesAfterDiscounts: weeks.reduce((s, w) => s + w.salesAfterDiscounts, 0),
-    gst5Pct: weeks.reduce((s, w) => s + w.gst5Pct, 0),
-    salesInclGst: weeks.reduce((s, w) => s + w.salesInclGst, 0),
-    commission: weeks.reduce((s, w) => s + w.commission, 0),
-    tdsTcs: weeks.reduce((s, w) => s + w.tdsTcs, 0),
-    expectedPayout: weeks.reduce((s, w) => s + w.expectedPayout, 0),
-    bankActual: weeks.reduce((s, w) => s + w.bankActual, 0),
-    bankDiff: weeks.reduce((s, w) => s + w.bankDiff, 0),
+    orderTotalInclGst: sum("orderTotalInclGst"),
+    orderTotalExclGst: sum("orderTotalExclGst"),
+    discountExclGst: sum("discountExclGst"),
+    salesAfterDiscounts: sum("salesAfterDiscounts"),
+    salesExclGst: sum("salesAfterDiscounts"),
+    gst5Pct: sum("gst5Pct"),
+    tips: sum("tips"),
+    salesInclGst: sum("salesInclGst"),
+    serviceFee: sum("serviceFee"),
+    discountOnServiceFee: sum("discountOnServiceFee"),
+    collectionCharges: sum("collectionCharges"),
+    commission: sum("commission"),
+    ads: sum("ads"),
+    tds: sum("tds"),
+    tcs: sum("tcs"),
+    tdsTcs: sum("tdsTcs"),
+    profitFromDineout: sum("profitFromDineout"),
+    expectedPayout: sum("expectedPayout"),
+    bankActual: sum("bankActual"),
+    bankDiff: sum("bankDiff"),
     bankMatched: weeks.every((w) => w.bankMatched),
   };
 
@@ -938,15 +1042,18 @@ export async function runZomatoPayRecon({
   const weekRanges = generateWeekRanges(firstWeekStart, firstWeekEnd, lastWeekStart, lastWeekEnd);
   const bankTxs = await parseBankTransactions(bankFile);
 
+  // Zomato Pay: Bill Amount in settlement report is incl. 5% GST.
+  // Per Python reference: salesExclGst = billAmount × (100/105)
+  // Commission is pre-GST; gross-up × 1.18 before deducting.
   const weekDataMap = {};
   weekRanges.forEach((w) => {
     weekDataMap[w.weekNum] = {
       week: w,
-      billAmount: 0,
-      discounts: 0,
+      billAmountInclGst: 0,   // Raw Bill Amount from settlement (incl. 5% GST)
+      discountsInclGst: 0,    // Discounts/promos (incl. GST)
       failedTransactions: 0,
       tips: 0,
-      commission: 0,
+      commission: 0,          // Pre-GST in Zomato Pay report; grossed up × 1.18
       ads: 0,
     };
   });
@@ -954,59 +1061,73 @@ export async function runZomatoPayRecon({
   for (const file of files) {
     try {
       const wb = await readWorkbookFromFile(file);
-      const sheet = findSheetByPattern(wb, ["zomato pay", "calculations", "orders", "sheet1"]);
-      const rows = sheetToRows(sheet, 1);
+      // Zomato Pay uses a "Transactions summary" sheet for order data
+      const sheet = findSheetByPattern(wb, ["transactions summary", "zomato pay", "calculations", "orders", "sheet1"]);
+
+      let headerRowIdx = 1;
+      const rawGrid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      for (let i = 0; i < Math.min(10, rawGrid.length); i++) {
+        const rowStr = (rawGrid[i] || []).join(" ").toLowerCase();
+        if (rowStr.includes("date") && (rowStr.includes("bill") || rowStr.includes("amount"))) {
+          headerRowIdx = i + 1;
+          break;
+        }
+      }
+      const rows = sheetToRows(sheet, headerRowIdx);
 
       for (const r of rows) {
-        const dateStr = getRowString(r, ["date", "transaction date", "payment date"]);
+        const dateStr = getRowString(r, ["date", "transaction date", "payment date", "order date"]);
         const day = parseDayFromDate(dateStr) || parseDayFromDate(file.name) || 1;
         const targetWeek = findWeekForDay(day, weekRanges);
         const wData = weekDataMap[targetWeek.weekNum];
 
-        wData.billAmount += getRowVal(r, ["bill amount", "order amount", "gross amount", "amount"]);
-        wData.discounts += getRowVal(r, ["discount", "promo", "offers"]);
-        wData.failedTransactions += getRowVal(r, ["failed", "reversed", "refund"]);
+        wData.billAmountInclGst += getRowVal(r, ["bill amount", "order amount", "gross amount", "amount", "total amount"]);
+        wData.discountsInclGst += getRowVal(r, ["discount", "promo", "offers", "zomato discount"]);
+        wData.failedTransactions += getRowVal(r, ["failed", "reversed", "refund", "failed amount"]);
         wData.tips += getRowVal(r, ["tip", "tips"]);
-        wData.commission += getRowVal(r, ["commission", "service fee", "platform fee"]);
+        wData.commission += getRowVal(r, ["commission", "service fee", "platform fee", "convenience fee"]);
       }
     } catch (e) {
       console.warn("Error parsing Zomato Pay file:", file.name, e);
     }
   }
 
-  // Process Ads
+  // Process Ads from "Additions & deductions" sheet (separate file or second sheet)
   for (const file of adsFiles) {
     try {
       const wb = await readWorkbookFromFile(file);
-      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const sheet = findSheetByPattern(wb, ["additions & deductions", "additions deductions", "ads", "deductions"]);
       const rows = sheetToRows(sheet, 1);
       for (const r of rows) {
         const dateStr = getRowString(r, ["date"]);
         const day = parseDayFromDate(dateStr) || 1;
         const targetWeek = findWeekForDay(day, weekRanges);
-        weekDataMap[targetWeek.weekNum].ads += getRowVal(r, ["amount", "ad spend", "cost"]);
+        weekDataMap[targetWeek.weekNum].ads += getRowVal(r, ["amount", "ad spend", "cost", "debit"]);
       }
     } catch (e) {
-      console.warn("Error parsing Ads file:", file.name, e);
+      console.warn("Error parsing Zomato Pay Ads file:", file.name, e);
     }
   }
 
   const weeks = weekRanges.map((w) => {
     const d = weekDataMap[w.weekNum];
-    // Formula from Python repo: (billAmount * 100/105) - (discounts * 100/105)
-    const salesExclGstBefore = d.billAmount * (100.0 / 105.0);
-    const discountsExclGst = d.discounts * (100.0 / 105.0);
+    // Per Python reference: billAmount * 100/105 = excl-GST
+    const salesExclGstBefore = d.billAmountInclGst * (100.0 / 105.0);
+    const discountsExclGst = d.discountsInclGst * (100.0 / 105.0);
     const salesExclGstAfter = Math.max(0, salesExclGstBefore - discountsExclGst - d.failedTransactions);
     const gst5Pct = salesExclGstAfter * 0.05;
     const salesInclGst = salesExclGstAfter + gst5Pct + d.tips;
+    // Commission is pre-GST in Zomato Pay settlement; gross up × 1.18
     const commissionInclGst = d.commission * 1.18;
-    const expectedPayout = Math.max(0, salesInclGst - commissionInclGst - d.ads);
+    const profitFromZomatoPay = Math.max(0, salesInclGst - commissionInclGst - d.ads);
+    const expectedPayout = profitFromZomatoPay;
 
     const bankCheck = matchBankPayout(expectedPayout, bankTxs);
 
     return {
       weekNum: w.weekNum,
       label: w.label,
+      billAmountInclGst: d.billAmountInclGst,
       salesExclGstBefore,
       discounts: discountsExclGst,
       failedTransactions: d.failedTransactions,
@@ -1014,8 +1135,10 @@ export async function runZomatoPayRecon({
       gst5Pct,
       tips: d.tips,
       salesInclGst,
+      commission: d.commission,
       commissionInclGst,
       ads: d.ads,
+      profitFromZomatoPay,
       expectedPayout,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
       bankDiff: bankCheck.matched ? bankCheck.diff : -expectedPayout,
@@ -1023,20 +1146,24 @@ export async function runZomatoPayRecon({
     };
   });
 
+  const sum = (key) => weeks.reduce((s, w) => s + (w[key] || 0), 0);
   const total = {
     label: "Total",
-    salesExclGstBefore: weeks.reduce((s, w) => s + w.salesExclGstBefore, 0),
-    discounts: weeks.reduce((s, w) => s + w.discounts, 0),
-    failedTransactions: weeks.reduce((s, w) => s + w.failedTransactions, 0),
-    salesExclGstAfter: weeks.reduce((s, w) => s + w.salesExclGstAfter, 0),
-    gst5Pct: weeks.reduce((s, w) => s + w.gst5Pct, 0),
-    tips: weeks.reduce((s, w) => s + w.tips, 0),
-    salesInclGst: weeks.reduce((s, w) => s + w.salesInclGst, 0),
-    commissionInclGst: weeks.reduce((s, w) => s + w.commissionInclGst, 0),
-    ads: weeks.reduce((s, w) => s + w.ads, 0),
-    expectedPayout: weeks.reduce((s, w) => s + w.expectedPayout, 0),
-    bankActual: weeks.reduce((s, w) => s + w.bankActual, 0),
-    bankDiff: weeks.reduce((s, w) => s + w.bankDiff, 0),
+    billAmountInclGst: sum("billAmountInclGst"),
+    salesExclGstBefore: sum("salesExclGstBefore"),
+    discounts: sum("discounts"),
+    failedTransactions: sum("failedTransactions"),
+    salesExclGstAfter: sum("salesExclGstAfter"),
+    gst5Pct: sum("gst5Pct"),
+    tips: sum("tips"),
+    salesInclGst: sum("salesInclGst"),
+    commission: sum("commission"),
+    commissionInclGst: sum("commissionInclGst"),
+    ads: sum("ads"),
+    profitFromZomatoPay: sum("profitFromZomatoPay"),
+    expectedPayout: sum("expectedPayout"),
+    bankActual: sum("bankActual"),
+    bankDiff: sum("bankDiff"),
     bankMatched: weeks.every((w) => w.bankMatched),
   };
 
@@ -1067,13 +1194,15 @@ export async function runPaytmRecon({
   const weekRanges = generateWeekRanges(firstWeekStart, firstWeekEnd, lastWeekStart, lastWeekEnd);
   const bankTxs = await parseBankTransactions(bankFile);
 
+  // Paytm: Sales are excl. GST in the settlement report.
+  // MDR (commission) is pre-GST; gross-up × 1.18 before deducting.
   const weekDataMap = {};
   weekRanges.forEach((w) => {
     weekDataMap[w.weekNum] = {
       week: w,
-      salesExclGst: 0,
-      failedTransactions: 0,
-      commission: 0,
+      salesExclGst: 0,        // Gross sales (excl. 5% GST)
+      failedTransactions: 0,  // Refunds / chargebacks / failed
+      commission: 0,          // MDR (pre-GST); will be grossed up × 1.18
       netSettlement: 0,
     };
   });
@@ -1081,19 +1210,29 @@ export async function runPaytmRecon({
   for (const file of files) {
     try {
       const wb = await readWorkbookFromFile(file);
-      const sheet = findSheetByPattern(wb, ["paytm", "settlement", "sheet1"]);
-      const rows = sheetToRows(sheet, 1);
+      const sheet = findSheetByPattern(wb, ["paytm", "settlement", "transactions", "sheet1"]);
+
+      let headerRowIdx = 1;
+      const rawGrid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+      for (let i = 0; i < Math.min(10, rawGrid.length); i++) {
+        const rowStr = (rawGrid[i] || []).join(" ").toLowerCase();
+        if (rowStr.includes("amount") || rowStr.includes("date") || rowStr.includes("transaction")) {
+          headerRowIdx = i + 1;
+          break;
+        }
+      }
+      const rows = sheetToRows(sheet, headerRowIdx);
 
       for (const r of rows) {
-        const dateStr = getRowString(r, ["date", "transaction date", "settlement date"]);
+        const dateStr = getRowString(r, ["date", "transaction date", "settlement date", "txn date"]);
         const day = parseDayFromDate(dateStr) || parseDayFromDate(file.name) || 1;
         const targetWeek = findWeekForDay(day, weekRanges);
         const wData = weekDataMap[targetWeek.weekNum];
 
-        wData.salesExclGst += getRowVal(r, ["amount", "order amount", "gross amount", "total"]);
-        wData.failedTransactions += getRowVal(r, ["failed", "refund", "chargeback"]);
-        wData.commission += getRowVal(r, ["fee", "commission", "mdr", "charges"]);
-        wData.netSettlement += getRowVal(r, ["settlement amount", "net payout", "net amount"]);
+        wData.salesExclGst += getRowVal(r, ["amount", "order amount", "gross amount", "total", "transaction amount"]);
+        wData.failedTransactions += getRowVal(r, ["failed", "refund", "chargeback", "reversal"]);
+        wData.commission += getRowVal(r, ["fee", "commission", "mdr", "charges", "paytm charges"]);
+        wData.netSettlement += getRowVal(r, ["settlement amount", "net payout", "net amount", "net settlement"]);
       }
     } catch (e) {
       console.warn("Error parsing Paytm file:", file.name, e);
@@ -1105,8 +1244,10 @@ export async function runPaytmRecon({
     const salesAfterFailed = Math.max(0, d.salesExclGst - d.failedTransactions);
     const gst5Pct = salesAfterFailed * 0.05;
     const salesInclGst = salesAfterFailed + gst5Pct;
+    // MDR is pre-GST in Paytm settlement report; gross up × 1.18
     const commissionInclGst = d.commission * 1.18;
-    const expectedReceipt = Math.max(0, salesInclGst - commissionInclGst);
+    const profitFromPaytm = Math.max(0, salesInclGst - commissionInclGst);
+    const expectedReceipt = profitFromPaytm;
 
     const bankCheck = matchBankPayout(expectedReceipt, bankTxs);
 
@@ -1118,7 +1259,10 @@ export async function runPaytmRecon({
       salesAfterFailed,
       gst5Pct,
       salesInclGst,
+      commission: d.commission,
       commissionInclGst,
+      profitFromPaytm,
+      expectedPayout: expectedReceipt,
       expectedReceipt,
       bankActual: bankCheck.matched ? bankCheck.actual : 0,
       bankDiff: bankCheck.matched ? bankCheck.diff : -expectedReceipt,
@@ -1126,17 +1270,21 @@ export async function runPaytmRecon({
     };
   });
 
+  const sum = (key) => weeks.reduce((s, w) => s + (w[key] || 0), 0);
   const total = {
     label: "Total",
-    salesExclGst: weeks.reduce((s, w) => s + w.salesExclGst, 0),
-    failedTransactions: weeks.reduce((s, w) => s + w.failedTransactions, 0),
-    salesAfterFailed: weeks.reduce((s, w) => s + w.salesAfterFailed, 0),
-    gst5Pct: weeks.reduce((s, w) => s + w.gst5Pct, 0),
-    salesInclGst: weeks.reduce((s, w) => s + w.salesInclGst, 0),
-    commissionInclGst: weeks.reduce((s, w) => s + w.commissionInclGst, 0),
-    expectedReceipt: weeks.reduce((s, w) => s + w.expectedReceipt, 0),
-    bankActual: weeks.reduce((s, w) => s + w.bankActual, 0),
-    bankDiff: weeks.reduce((s, w) => s + w.bankDiff, 0),
+    salesExclGst: sum("salesExclGst"),
+    failedTransactions: sum("failedTransactions"),
+    salesAfterFailed: sum("salesAfterFailed"),
+    gst5Pct: sum("gst5Pct"),
+    salesInclGst: sum("salesInclGst"),
+    commission: sum("commission"),
+    commissionInclGst: sum("commissionInclGst"),
+    profitFromPaytm: sum("profitFromPaytm"),
+    expectedPayout: sum("expectedReceipt"),
+    expectedReceipt: sum("expectedReceipt"),
+    bankActual: sum("bankActual"),
+    bankDiff: sum("bankDiff"),
     bankMatched: weeks.every((w) => w.bankMatched),
   };
 
@@ -1342,30 +1490,33 @@ export function exportReconWorkbook(report) {
 // ═════════════════════════════════════════════════════════════════════════════
 // SHARED LINE-ITEM ROW DEFINITIONS — used by both the on-screen breakdown
 // tables (page.js) and the downloadable multi-sheet workbook below, so the
-// two views can never drift out of sync. For Zomato these are a row-by-row
-// match of the original recon tool's own Summary/Cashflow/Profit
-// statement/Discrepancies sheets (verified by recalculating a real output
-// file from the original tool and comparing every line). Other platforms
-// currently fall back to the common fields the recon engines already
-// compute, since only Zomato has been validated against real report data.
+// two views can never drift out of sync.
+// Row structure: [label, getter(weekOrTotal), kind]
+// kind = "add" | "less" | "subtotal" | "total" | "variance" | "percent" | "plain" | "section"
 // ═════════════════════════════════════════════════════════════════════════════
 const r2 = (v) => Math.round((v || 0) * 100) / 100;
 
+// ── Platform detection guards ─────────────────────────────────────────────────
 export function isZomatoDetailed(report) {
   return report.platform === "Zomato" && report.weeks.length > 0 && "itemSales" in report.weeks[0];
 }
+export function isSwiggyDetailed(report) {
+  return report.platform === "Swiggy" && report.weeks.length > 0 && "platformFee" in report.weeks[0];
+}
+export function isDineoutDetailed(report) {
+  return report.platform === "Swiggy Dineout" && report.weeks.length > 0 && "orderTotalExclGst" in report.weeks[0];
+}
+export function isZomatoPayDetailed(report) {
+  return report.platform === "Zomato Pay" && report.weeks.length > 0 && "salesExclGstBefore" in report.weeks[0];
+}
+export function isPaytmDetailed(report) {
+  return report.platform === "Paytm" && report.weeks.length > 0 && "salesAfterFailed" in report.weeks[0];
+}
 
-// A handful of rows in the original tool (refunds on disputed orders,
-// manual dispute counts, week-boundary carry-over adjustments, EMI/loan
-// deductions, etc.) aren't derivable from a settlement report alone — the
-// original tool also just defaults them to 0 / leaves them for manual entry.
-// They're kept here, at 0, purely so the structure matches line-for-line;
-// each is commented with what it represents.
+// Rows that are always 0 (manual-entry placeholders kept for structural parity)
 const zero = () => 0;
 
-// Each row: [label, getter(weekOrTotal), kind] — kind is a display hint
-// ("add" | "less" | "subtotal" | "total" | "variance" | "percent" | "plain")
-// used by the on-screen table for styling; the workbook export ignores it.
+// Each row: [label, getter(weekOrTotal), kind]
 export function getSummaryRowDefs(report) {
   if (isZomatoDetailed(report)) {
     return [
@@ -1381,6 +1532,62 @@ export function getSummaryRowDefs(report) {
       ["Other Charges & Tax Adjustments", (x) => x.otherChargesAndTaxAdj, "less"],
       ["Zomato Hyperpure Adjustments", (x) => x.hyperpure, "less"],
       ["Money Received (Expected)", (x) => x.expectedPayout, "total"],
+    ];
+  }
+  if (isSwiggyDetailed(report)) {
+    return [
+      ["No. of Orders", (x) => x.orders, "plain"],
+      ["Total Income (Swiggy Dashboard)", (x) => x.netSales, "plain"],
+      ["Avg. Order Value", (x) => (x.orders ? x.netSales / x.orders : 0), "plain"],
+      ["Discounts", (x) => x.discounts, "less"],
+      ["Commissionable Amount", (x) => x.commissionableAmount, "plain"],
+      ["Commission (Platform + Other Fees, incl. GST)", (x) => x.commission, "less"],
+      ["Customer Complaints & Cancellation Charges", (x) => (x.customerComplaints || 0) + (x.cancellationCharges || 0), "less"],
+      ["Tax Adjustments (TDS + TCS)", (x) => x.taxAdjustments, "less"],
+      ["GST collected & paid by Swiggy", (x) => x.gstPaidBySwiggy, "less"],
+      ["Marketing & Ads", (x) => x.marketingAds, "less"],
+      ["Money Received (Expected)", (x) => x.expectedPayout, "total"],
+    ];
+  }
+  if (isDineoutDetailed(report)) {
+    return [
+      ["Order Total (Incl. 5% GST)", (x) => x.orderTotalInclGst, "plain"],
+      ["Order Total (Excl. GST, ÷1.05)", (x) => x.orderTotalExclGst, "plain"],
+      ["Less:- Discounts (Excl. GST)", (x) => x.discountExclGst, "less"],
+      ["Sales After Discounts", (x) => x.salesAfterDiscounts, "subtotal"],
+      ["Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["Add:- Tips", (x) => x.tips, "add"],
+      ["Sales Incl. GST", (x) => x.salesInclGst, "subtotal"],
+      ["Less:- Commission (Service Fee net)", (x) => x.commission, "less"],
+      ["Less:- Ads", (x) => x.ads, "less"],
+      ["Less:- TDS + TCS", (x) => x.tdsTcs, "less"],
+      ["Expected Payout", (x) => x.expectedPayout, "total"],
+    ];
+  }
+  if (isZomatoPayDetailed(report)) {
+    return [
+      ["Bill Amount (Incl. 5% GST)", (x) => x.billAmountInclGst, "plain"],
+      ["Sales Excl. GST (Bill × 100/105)", (x) => x.salesExclGstBefore, "plain"],
+      ["Less:- Discounts (Excl. GST)", (x) => x.discounts, "less"],
+      ["Less:- Failed / Reversed Transactions", (x) => x.failedTransactions, "less"],
+      ["Net Sales (Excl. GST)", (x) => x.salesExclGstAfter, "subtotal"],
+      ["Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["Add:- Tips", (x) => x.tips, "add"],
+      ["Sales Incl. GST", (x) => x.salesInclGst, "subtotal"],
+      ["Less:- Commission (Incl. 18% GST)", (x) => x.commissionInclGst, "less"],
+      ["Less:- Ads", (x) => x.ads, "less"],
+      ["Expected Payout", (x) => x.expectedPayout, "total"],
+    ];
+  }
+  if (isPaytmDetailed(report)) {
+    return [
+      ["Gross Sales (Excl. GST)", (x) => x.salesExclGst, "plain"],
+      ["Less:- Failed / Refunded Transactions", (x) => x.failedTransactions, "less"],
+      ["Net Sales (Excl. GST)", (x) => x.salesAfterFailed, "subtotal"],
+      ["Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["Sales Incl. GST", (x) => x.salesInclGst, "subtotal"],
+      ["Less:- MDR / Commission (Incl. 18% GST)", (x) => x.commissionInclGst, "less"],
+      ["Expected Receipt", (x) => x.expectedReceipt, "total"],
     ];
   }
   return [
@@ -1432,6 +1639,83 @@ export function getCashflowRowDefs(report) {
       ["Difference (Expected − Actual)", (x) => x.expectedPayout - x.bankActual, "variance"],
     ];
   }
+  if (isSwiggyDetailed(report)) {
+    return [
+      ["Item sales", (x) => x.itemSales, "plain"],
+      ["Add:- Packing charges", (x) => x.packagingCharges, "add"],
+      ["Add:- Compensation (net, cancelled orders)", (x) => x.compensation, "add"],
+      ["Less:- Discount", (x) => -x.discounts, "less"],
+      ["Add:- GST 5%", (x) => x.gstCollected, "add"],
+      ["Net Sales", (x) => x.netSales, "subtotal"],
+      ["Less:- Platform Fee (Commission, incl. GST)", (x) => -x.platformFee, "less"],
+      ["   Swiggy One Fees", (x) => -(x.swiggyOneFee || 0), "less"],
+      ["   Call Center Service Fees", (x) => -(x.callCenterFee || 0), "less"],
+      ["   PocketHero Fee", (x) => -(x.pocketHeroFee || 0), "less"],
+      ["   Long Distance Charges", (x) => -(x.longDistanceFee || 0), "less"],
+      ["   Payment Collection Charges", (x) => -(x.collectionCharges || 0), "less"],
+      ["Less:- Merchant Cancellation Charges", (x) => -(x.cancellationCharges || 0), "less"],
+      ["Less:- Customer Complaints (Paid by restaurant)", (x) => -(x.customerComplaints || 0), "less"],
+      ["Less:- Marketing & Ads", (x) => -(x.marketingAds || 0), "less"],
+      ["Profit from Swiggy", (x) => x.profitFromSwiggy, "subtotal"],
+      ["Less:- Tax Adjustments", (x) => -(x.taxAdjustments || 0), "less"],
+      ["   TDS deduction for aggregators", (x) => -(x.tds || 0), "less"],
+      ["   TCS", (x) => -(x.tcs || 0), "less"],
+      ["Less:- GST collected and paid by Swiggy", (x) => -(x.gstPaidBySwiggy || 0), "less"],
+      ["Expected Receipts", (x) => x.expectedPayout, "total"],
+      ["Actual receipts", (x) => x.bankActual || 0, "plain"],
+      ["Difference (Expected − Actual)", (x) => (x.expectedPayout || 0) - (x.bankActual || 0), "variance"],
+    ];
+  }
+  if (isDineoutDetailed(report)) {
+    return [
+      ["Order Total (Incl. GST from Dineout report)", (x) => x.orderTotalInclGst, "plain"],
+      ["Order Total (Excl. GST, ÷1.05)", (x) => x.orderTotalExclGst, "plain"],
+      ["Less:- Total Merchant Discount (Excl. GST)", (x) => -(x.discountExclGst || 0), "less"],
+      ["Net Sales (Excl. GST)", (x) => x.salesAfterDiscounts, "subtotal"],
+      ["Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["Add:- Tips", (x) => x.tips || 0, "add"],
+      ["Net Sales (Incl. GST)", (x) => x.salesInclGst, "subtotal"],
+      ["Less:- Service Fee (Platform Commission)", (x) => -(x.serviceFee || 0), "less"],
+      ["Add:- Discount on Service Fee", (x) => x.discountOnServiceFee || 0, "add"],
+      ["Less:- Collection Charges", (x) => -(x.collectionCharges || 0), "less"],
+      ["Less:- Ads", (x) => -(x.ads || 0), "less"],
+      ["Profit from Dineout", (x) => x.profitFromDineout, "subtotal"],
+      ["Less:- TDS + TCS", (x) => -(x.tdsTcs || 0), "less"],
+      ["Expected Payout", (x) => x.expectedPayout, "total"],
+      ["Actual receipts", (x) => x.bankActual || 0, "plain"],
+      ["Difference (Expected − Actual)", (x) => (x.expectedPayout || 0) - (x.bankActual || 0), "variance"],
+    ];
+  }
+  if (isZomatoPayDetailed(report)) {
+    return [
+      ["Bill Amount (Incl. 5% GST)", (x) => x.billAmountInclGst, "plain"],
+      ["Sales Excl. GST (Bill × 100/105)", (x) => x.salesExclGstBefore, "plain"],
+      ["Less:- Discounts (Excl. GST)", (x) => -(x.discounts || 0), "less"],
+      ["Less:- Failed / Reversed Transactions", (x) => -(x.failedTransactions || 0), "less"],
+      ["Net Sales (Excl. GST)", (x) => x.salesExclGstAfter, "subtotal"],
+      ["Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["Add:- Tips", (x) => x.tips || 0, "add"],
+      ["Net Sales (Incl. GST)", (x) => x.salesInclGst, "subtotal"],
+      ["Less:- Commission (Incl. 18% GST)", (x) => -(x.commissionInclGst || 0), "less"],
+      ["Less:- Ads", (x) => -(x.ads || 0), "less"],
+      ["Profit / Expected Payout", (x) => x.expectedPayout, "total"],
+      ["Actual receipts", (x) => x.bankActual || 0, "plain"],
+      ["Difference (Expected − Actual)", (x) => (x.expectedPayout || 0) - (x.bankActual || 0), "variance"],
+    ];
+  }
+  if (isPaytmDetailed(report)) {
+    return [
+      ["Gross Sales (Excl. GST)", (x) => x.salesExclGst, "plain"],
+      ["Less:- Failed / Refunded Transactions", (x) => -(x.failedTransactions || 0), "less"],
+      ["Net Sales (Excl. GST)", (x) => x.salesAfterFailed, "subtotal"],
+      ["Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["Net Sales (Incl. GST)", (x) => x.salesInclGst, "subtotal"],
+      ["Less:- MDR / Commission (Incl. 18% GST)", (x) => -(x.commissionInclGst || 0), "less"],
+      ["Expected Receipt", (x) => x.expectedReceipt, "total"],
+      ["Actual receipts", (x) => x.bankActual || 0, "plain"],
+      ["Difference (Expected − Actual)", (x) => (x.expectedReceipt || 0) - (x.bankActual || 0), "variance"],
+    ];
+  }
   return [
     ["Gross Sales / Total Income", (x) => x.grossSales ?? x.totalIncome ?? x.salesInclGst ?? 0, "plain"],
     ["Less:- Discount", (x) => -(x.discounts || 0), "less"],
@@ -1459,18 +1743,66 @@ export function getProfitRowDefs(report) {
       ["Percentage of Net Sales", (x) => (x.netSalesNumerize ? x.profitFromZomato / x.netSalesNumerize : 0), "percent"],
     ];
   }
+  if (isSwiggyDetailed(report)) {
+    return [
+      ["A. Net Sales", (x) => "", "section"],
+      ["   Total Income (Item + Packaging + GST − Discounts − GST paid by Swiggy)", (x) => x.totalIncomeProfitStmt, "plain"],
+      ["   Add:- Compensation (cancelled orders, net)", (x) => x.compensation || 0, "add"],
+      ["   Net Sales (Numerize)", (x) => x.netSalesNumerize, "subtotal"],
+      ["B. Less:- Commission (all platform fees, incl. GST)", (x) => -(x.commission || 0), "less"],
+      ["C. Less:- Marketing & Ads", (x) => -(x.marketingAds || 0), "less"],
+      ["D. Less:- Customer Complaints & Cancellation Charges", (x) => -((x.customerComplaints || 0) + (x.cancellationCharges || 0)), "less"],
+      ["E. Profit from Swiggy (A − B − C − D)", (x) => x.profitFromSwiggy, "total"],
+      ["Percentage of Net Sales", (x) => (x.netSalesNumerize ? x.profitFromSwiggy / x.netSalesNumerize : 0), "percent"],
+    ];
+  }
+  if (isDineoutDetailed(report)) {
+    return [
+      ["A. Sales (Excl. GST, after discounts)", (x) => x.salesAfterDiscounts, "plain"],
+      ["B. Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["C. Add:- Tips", (x) => x.tips || 0, "add"],
+      ["   Net Sales (Incl. GST)", (x) => x.salesInclGst, "subtotal"],
+      ["D. Less:- Commission (Service Fee)", (x) => -(x.commission || 0), "less"],
+      ["E. Less:- Ads", (x) => -(x.ads || 0), "less"],
+      ["F. Less:- TDS + TCS", (x) => -(x.tdsTcs || 0), "less"],
+      ["Profit from Dineout (A+B+C − D − E − F)", (x) => x.profitFromDineout, "total"],
+      ["Percentage of Net Sales", (x) => (x.salesInclGst ? x.profitFromDineout / x.salesInclGst : 0), "percent"],
+    ];
+  }
+  if (isZomatoPayDetailed(report)) {
+    return [
+      ["A. Net Sales Excl. GST (after discounts & failed)", (x) => x.salesExclGstAfter, "plain"],
+      ["B. Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["C. Add:- Tips", (x) => x.tips || 0, "add"],
+      ["   Net Sales (Incl. GST)", (x) => x.salesInclGst, "subtotal"],
+      ["D. Less:- Commission (Incl. 18% GST)", (x) => -(x.commissionInclGst || 0), "less"],
+      ["E. Less:- Ads", (x) => -(x.ads || 0), "less"],
+      ["Profit from Zomato Pay", (x) => x.profitFromZomatoPay, "total"],
+      ["Percentage of Net Sales", (x) => (x.salesInclGst ? x.profitFromZomatoPay / x.salesInclGst : 0), "percent"],
+    ];
+  }
+  if (isPaytmDetailed(report)) {
+    return [
+      ["A. Gross Sales (Excl. GST)", (x) => x.salesExclGst, "plain"],
+      ["B. Less:- Failed / Refunded Transactions", (x) => -(x.failedTransactions || 0), "less"],
+      ["   Net Sales (Excl. GST)", (x) => x.salesAfterFailed, "subtotal"],
+      ["C. Add:- GST 5%", (x) => x.gst5Pct, "add"],
+      ["   Net Sales (Incl. GST)", (x) => x.salesInclGst, "subtotal"],
+      ["D. Less:- MDR / Commission (Incl. 18% GST)", (x) => -(x.commissionInclGst || 0), "less"],
+      ["Profit from Paytm", (x) => x.profitFromPaytm, "total"],
+      ["Percentage of Net Sales", (x) => (x.salesInclGst ? x.profitFromPaytm / x.salesInclGst : 0), "percent"],
+    ];
+  }
   return [
-    ["A. Net Sales (Gross Sales − Discounts + GST)", (x) => (x.grossSales ?? x.totalIncome ?? x.salesInclGst ?? 0) - (x.discounts || 0) + (x.gstCollected ?? x.gst5Pct ?? 0), "plain"],
+    ["A. Net Sales (Gross − Discounts + GST)", (x) => (x.grossSales ?? x.totalIncome ?? x.salesInclGst ?? 0) - (x.discounts || 0) + (x.gstCollected ?? x.gst5Pct ?? 0), "plain"],
     ["B. Less:- Commission", (x) => -(x.commission ?? x.commissionInclGst ?? 0), "less"],
     ["C. Less:- Other Deductions/Taxes", (x) => -(x.otherDeductions ?? x.taxesAndDeductions ?? 0), "less"],
     ["Expected Payout (A − B − C)", (x) => x.expectedPayout ?? x.expectedReceipt ?? 0, "total"],
   ];
 }
 
-// Discrepancies mirrors the original tool's A. POS / B. Order / C. Payment
-// three-section layout. Note the sign convention here matches the original
-// tool exactly: Difference = Expected − Actual (positive = shortfall),
-// which is the opposite sign from the "Variance" used in the Cashflow row.
+// Discrepancies: mirrors the original tool's A. POS / B. Order / C. Payment layout.
+// Sign convention: Difference = Expected − Actual (positive = shortfall).
 export function getDiscrepancyRowDefs(report) {
   if (isZomatoDetailed(report)) {
     return [
@@ -1483,9 +1815,37 @@ export function getDiscrepancyRowDefs(report) {
       ["   Value of such orders (manual entry)", zero, "plain"],
       ["C. Payment Discrepancies", (x) => "", "section"],
       ["   Expected receipts in the bank account", (x) => x.expectedPayout, "plain"],
-      ["   Investment in Hyperpure", (x) => -x.hyperpure, "less"],
-      ["   Actual receipts in the bank", (x) => x.bankActual, "plain"],
-      ["   Difference (Expected − Actual)", (x) => x.expectedPayout - x.hyperpure - x.bankActual, "total"],
+      ["   Investment in Hyperpure", (x) => -(x.hyperpure || 0), "less"],
+      ["   Actual receipts in the bank", (x) => x.bankActual || 0, "plain"],
+      ["   Difference (Expected − Actual)", (x) => (x.expectedPayout || 0) - (x.hyperpure || 0) - (x.bankActual || 0), "total"],
+    ];
+  }
+  if (isSwiggyDetailed(report)) {
+    return [
+      ["A. POS Discrepancies", (x) => "", "section"],
+      ["   Sales as per Swiggy", (x) => x.netSales, "plain"],
+      ["   Sale as per POS (not uploaded)", zero, "plain"],
+      ["   Difference (POS − Swiggy)", (x) => -(x.netSales || 0), "less"],
+      ["B. Order Discrepancies", (x) => "", "section"],
+      ["   No. of orders unpaid (manual entry)", zero, "plain"],
+      ["   Value of such orders (manual entry)", zero, "plain"],
+      ["C. Payment Discrepancies", (x) => "", "section"],
+      ["   Expected receipts in the bank account", (x) => x.expectedPayout, "plain"],
+      ["   Actual receipts in the bank", (x) => x.bankActual || 0, "plain"],
+      ["   Difference (Expected − Actual)", (x) => (x.expectedPayout || 0) - (x.bankActual || 0), "total"],
+    ];
+  }
+  if (isDineoutDetailed(report) || isZomatoPayDetailed(report) || isPaytmDetailed(report)) {
+    const expGetter = (x) => x.expectedPayout ?? x.expectedReceipt ?? 0;
+    return [
+      ["A. POS Discrepancies", (x) => "", "section"],
+      ["   Sales as per Platform", (x) => x.salesInclGst || 0, "plain"],
+      ["   Sale as per POS (not uploaded)", zero, "plain"],
+      ["   Difference (POS − Platform)", (x) => -(x.salesInclGst || 0), "less"],
+      ["B. Payment Discrepancies", (x) => "", "section"],
+      ["   Expected receipts in the bank account", expGetter, "plain"],
+      ["   Actual receipts in the bank", (x) => x.bankActual || 0, "plain"],
+      ["   Difference (Expected − Actual)", (x) => expGetter(x) - (x.bankActual || 0), "total"],
     ];
   }
   return [
