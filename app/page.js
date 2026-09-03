@@ -437,7 +437,24 @@ async function readFile(file) {
     qty: col(h, ["Quantity", "Qty", "Quantity Billed"]),
     rate: col(h, ["Rate", "Item Rate", "Price", "Unit Price"]),
     total: col(h, ["Item Total", "Line Item Total", "Total", "Amount", "Line Amount"]),
-    branch: col(h, ["Branch Name", "Branch", "Location"])
+    branch: col(h, [
+      "Branch Name",
+      "Branch",
+      "Location Name",
+      "Location",
+      "Outlet Name",
+      "Outlet",
+      "Store Name",
+      "Store",
+      "Restaurant Name",
+      "Restaurant",
+      "Unit Name",
+      "Unit",
+      "Cost Center",
+      "Entity",
+      "Division",
+      "Department"
+    ])
   };
   if (i.vendor < 0 || i.date < 0) throw new Error("Bill Date and Vendor Name are required.");
   const get = (row, key) => i[key] >= 0 ? row[i[key]] : "";
@@ -1085,6 +1102,7 @@ function AccountPivot({ current }) {
 function DataPreview({ data }) {
   if (!data) return null;
   const { name, records, colMap } = data;
+  const hasBranch = records.some((r) => r.branch && r.branch.trim());
   const sample = records.slice(0, 20);
   const blankItem = records.filter(r => !r.item).length;
   const blankAccount = records.filter(r => !r.account || r.account === "Unassigned Account").length;
@@ -1118,6 +1136,7 @@ function DataPreview({ data }) {
               <th>Date</th>
               <th>Vendor</th>
               <th>Bill No.</th>
+              {hasBranch && <th>Branch</th>}
               <th style={{ background: blankAccount > 0 ? "#fef9c3" : undefined }}>Account Head</th>
               <th style={{ background: blankItem > 0 ? "#fef9c3" : undefined }}>Item Name</th>
               <th>Qty</th>
@@ -1132,6 +1151,7 @@ function DataPreview({ data }) {
                 <td>{r.date}</td>
                 <td style={{ fontWeight: 500 }}>{r.vendor}</td>
                 <td style={{ color: "var(--muted)" }}>{r.bill || "-"}</td>
+                {hasBranch && <td style={{ color: "var(--forest)", fontWeight: 600 }}>{r.branch || "—"}</td>}
                 <td style={{ background: (!r.account || r.account === "Unassigned Account") ? "#fef3c7" : undefined }}>
                   {r.account || <em style={{ color: "#ef4444" }}>Missing</em>}
                 </td>
@@ -1457,6 +1477,7 @@ function AiChatWidget({ availableAccounts, apiKey, model, onOpenSetup }) {
 export default function Home() {
   const [mainTab, setMainTab] = useState("purchase");
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
+  const [selectedBranch, setSelectedBranch] = useState("all");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
   const [aiConfig, setAiConfig] = useState(() => {
     if (typeof window === "undefined") return null;
@@ -1486,11 +1507,46 @@ export default function Home() {
   };
 
   const setT = (k, v) => setThresholds(t => ({ ...t, [k]: v }));
-  const result = useMemo(() => current && previous ? analyse(current, previous, thresholds) : null, [current, previous, thresholds]);
+
+  // Auto-detect all unique branches present in either file
+  const availableBranches = useMemo(() => {
+    const set = new Set();
+    if (current?.records) {
+      current.records.forEach(r => { if (r.branch && r.branch.trim()) set.add(r.branch.trim()); });
+    }
+    if (previous?.records) {
+      previous.records.forEach(r => { if (r.branch && r.branch.trim()) set.add(r.branch.trim()); });
+    }
+    return Array.from(set).sort();
+  }, [current, previous]);
+
+  // Reset selected branch if it no longer exists in newly uploaded files
+  useEffect(() => {
+    if (selectedBranch !== "all" && !availableBranches.includes(selectedBranch)) {
+      setSelectedBranch("all");
+    }
+  }, [availableBranches, selectedBranch]);
+
+  // Filter current and previous datasets by selected branch
+  const filteredCurrent = useMemo(() => {
+    if (!current) return null;
+    if (selectedBranch === "all") return current;
+    const filteredRecords = current.records.filter(r => clean(r.branch) === clean(selectedBranch));
+    return { ...current, records: filteredRecords };
+  }, [current, selectedBranch]);
+
+  const filteredPrevious = useMemo(() => {
+    if (!previous) return null;
+    if (selectedBranch === "all") return previous;
+    const filteredRecords = previous.records.filter(r => clean(r.branch) === clean(selectedBranch));
+    return { ...previous, records: filteredRecords };
+  }, [previous, selectedBranch]);
+
+  const result = useMemo(() => filteredCurrent && filteredPrevious ? analyse(filteredCurrent, filteredPrevious, thresholds) : null, [filteredCurrent, filteredPrevious, thresholds]);
   const upload = async (file, setter) => { try { setError(""); setter(await readFile(file)); } catch (e) { setError(e.message); } };
   const spend = x => x?.records.reduce((s, r) => s + r.total, 0) || 0;
   const total = result && (result.duplicates.length + result.vendors.length + result.items.length + result.prices.length + result.misclassifications.length);
-  const sharedAccounts = useMemo(() => current ? [...new Set(current.records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))] : [], [current]);
+  const sharedAccounts = useMemo(() => filteredCurrent ? [...new Set(filteredCurrent.records.map(r => r.account).filter(a => a && a !== "Unassigned Account"))] : [], [filteredCurrent]);
 
   return (
     <main>
@@ -1551,6 +1607,7 @@ export default function Home() {
                 <b>Vendor variation</b>
                 <b>Item variation</b>
                 <b>Price exceptions</b>
+                <b>Multi-branch filtering</b>
               </div>
               <div className="uploads">
                 <Upload title="Current month" help="Upload the latest Zoho export" file={current} onChange={f => upload(f, setCurrent)} />
@@ -1561,17 +1618,58 @@ export default function Home() {
             </section>
           ) : (
             <>
-              <section className="run">
+              <section className="run" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 14 }}>
                 <div>
-                  <strong>Analysis ready</strong>
-                  <small>{current.name} vs {previous.name}</small>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                    <strong style={{ fontSize: "1.1rem" }}>Analysis ready</strong>
+                    {availableBranches.length > 0 && (
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, background: "rgba(255,255,255,0.18)", padding: "4px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.3)" }}>
+                        <span style={{ fontSize: "0.78rem", fontWeight: 700, color: "var(--lime, #98f5b4)" }}>🏬 Branch:</span>
+                        <select
+                          value={selectedBranch}
+                          onChange={e => setSelectedBranch(e.target.value)}
+                          style={{
+                            background: "rgba(0,0,0,0.35)",
+                            color: "#fff",
+                            border: "1px solid rgba(255,255,255,0.3)",
+                            borderRadius: 4,
+                            padding: "3px 8px",
+                            fontSize: "0.82rem",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                            outline: "none"
+                          }}
+                        >
+                          <option value="all" style={{ background: "var(--forest)", color: "#fff" }}>
+                            All Branches ({availableBranches.length})
+                          </option>
+                          {availableBranches.map(b => {
+                            const curCount = current?.records.filter(r => clean(r.branch) === clean(b)).length || 0;
+                            return (
+                              <option key={b} value={b} style={{ background: "var(--forest)", color: "#fff" }}>
+                                {b} ({curCount} rows)
+                              </option>
+                            );
+                          })}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <small style={{ display: "block", marginTop: 4 }}>
+                    {current.name} vs {previous.name}
+                    {selectedBranch !== "all" && (
+                      <span style={{ marginLeft: 8, color: "var(--lime, #98f5b4)", fontWeight: 700 }}>
+                        · Active Branch: {selectedBranch} ({filteredCurrent?.records.length} current rows)
+                      </span>
+                    )}
+                  </small>
                 </div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   <button className="ai-setup-run-btn" onClick={() => setShowAiSetup(true)}>
                     ⚙️ {groqModel ? `AI: ${groqModel}` : "Configure AI"}
                   </button>
                   <button className="verify-data-btn" onClick={() => setShowDataPreview(true)}>🔎 Verify Data</button>
-                  <button onClick={() => { setCurrent(null); setPrevious(null); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
+                  <button onClick={() => { setCurrent(null); setPrevious(null); setSelectedBranch("all"); setTab("Overview"); setShowDataPreview(false); }}>New review</button>
                 </div>
               </section>
 
@@ -1600,15 +1698,15 @@ export default function Home() {
                 <>
                   <section className="metrics">
                     <Card label="Audit findings" value={total} warm />
-                    <Card label="Current-month spend" value={show(spend(current))} />
-                    <Card label="Spend movement" value={show(spend(current) - spend(previous))} />
-                    <Card label="Rows reviewed" value={current.records.length.toLocaleString("en-IN")} />
+                    <Card label={selectedBranch !== "all" ? `Spend (${selectedBranch})` : "Current-month spend"} value={show(spend(filteredCurrent))} />
+                    <Card label="Spend movement" value={show(spend(filteredCurrent) - spend(filteredPrevious))} />
+                    <Card label="Rows reviewed" value={filteredCurrent.records.length.toLocaleString("en-IN")} />
                   </section>
                   <section className="panel">
                     <div className="panelhead">
                       <div>
                         <p className="eyebrow">PRIORITY QUEUE</p>
-                        <h2>What to review first</h2>
+                        <h2>What to review first {selectedBranch !== "all" && <span style={{ fontSize: "0.95rem", color: "var(--forest)", fontWeight: 600 }}>({selectedBranch})</span>}</h2>
                       </div>
                       <b className="badge">
                         {result.misclassifications.length + result.duplicates.length} critical issues
@@ -1657,7 +1755,7 @@ export default function Home() {
               {tab === "Misclassifications" && (
                 <MisclassificationsView
                   items={result.misclassifications}
-                  current={current}
+                  current={filteredCurrent}
                   onGoToPivot={() => setTab("Account heads")}
                   sharedApiKey={apiKey}
                   sharedModel={groqModel}
@@ -1666,7 +1764,7 @@ export default function Home() {
                 />
               )}
 
-              {tab === "Account heads" && <AccountPivot current={current} />}
+              {tab === "Account heads" && <AccountPivot current={filteredCurrent} />}
 
               {tab === "Duplicate bills" && (
                 <section className="panel">
@@ -1688,6 +1786,7 @@ export default function Home() {
                                 <tr style={{ background: "var(--border)" }}>
                                   <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Bill No.</th>
                                   <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Date</th>
+                                  <th style={{ padding: "5px 14px", textAlign: "left", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Branch</th>
                                   <th style={{ padding: "5px 14px", textAlign: "right", fontWeight: 600, color: "var(--muted)", letterSpacing: "0.05em" }}>Amount</th>
                                 </tr>
                               </thead>
@@ -1696,6 +1795,7 @@ export default function Home() {
                                   <tr key={j} style={{ borderBottom: "1px solid var(--border)" }}>
                                     <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.bill || "—"}</td>
                                     <td style={{ padding: "5px 14px", color: "var(--text)" }}>{r.date || "—"}</td>
+                                    <td style={{ padding: "5px 14px", color: "var(--muted)" }}>{r.branch || "—"}</td>
                                     <td style={{ padding: "5px 14px", textAlign: "right", color: x.risk === "Critical" ? "var(--red, #c0392b)" : "var(--text)", fontWeight: 500 }}>{show(r.total)}</td>
                                   </tr>
                                 ))}
@@ -1710,22 +1810,23 @@ export default function Home() {
                 </section>
               )}
 
-              {tab === "Vendor variation" && <Changes title="Vendor variation" rows={result.vendors} field="Vendor" threshold={thresholds.vendor} />}
-              {tab === "Purchase variation" && <Changes title="Purchase variation" rows={result.items} field="Item" threshold={thresholds.item} />}
+              {tab === "Vendor variation" && <Changes title="Vendor variation" rows={result.vendors} field="Vendor" threshold={thresholds.vendor} branch={selectedBranch !== "all" ? selectedBranch : ""} />}
+              {tab === "Purchase variation" && <Changes title="Purchase variation" rows={result.items} field="Item" threshold={thresholds.item} branch={selectedBranch !== "all" ? selectedBranch : ""} />}
 
               {tab === "Price exceptions" && (
                 <section className="panel">
                   <Panel title="Items purchased above weighted average" badge={`${thresholds.price}%+ above average`} />
-                  <Table head={["Item", "Vendor", "Rate paid", "Weighted average", "Variance"]}>
+                  <Table head={["Item", "Vendor", "Branch", "Rate paid", "Weighted average", "Variance"]}>
                     {result.prices.length ? result.prices.map((x, i) => (
                       <tr key={i}>
                         <td>{x.item}</td>
                         <td>{x.vendor}</td>
+                        <td style={{ color: "var(--muted)" }}>{x.branch || "—"}</td>
                         <td>{show(x.rate)}</td>
                         <td>{show(x.avg)}</td>
                         <td className="bad">+{(x.pct * 100).toFixed(0)}%</td>
                       </tr>
-                    )) : <tr><td colSpan="5"><Empty>No price exceptions found.</Empty></td></tr>}
+                    )) : <tr><td colSpan="6"><Empty>No price exceptions found.</Empty></td></tr>}
                   </Table>
                   {result.prices.length > 0 && <CopyPriceExceptionsButton prices={result.prices} />}
                 </section>
@@ -1738,14 +1839,14 @@ export default function Home() {
       )}
 
       {/* Data preview modal */}
-      {current && showDataPreview && (
+      {filteredCurrent && showDataPreview && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 200, overflowY: "auto", padding: "40px 16px" }}>
           <div style={{ maxWidth: 1100, margin: "0 auto", background: "var(--surface)", borderRadius: 12, overflow: "hidden" }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
-              <strong>Data Verification Preview</strong>
+              <strong>Data Verification Preview {selectedBranch !== "all" ? `(Filtered: ${selectedBranch})` : ""}</strong>
               <button className="pivot-btn" onClick={() => setShowDataPreview(false)}>Close ✕</button>
             </div>
-            <DataPreview data={current} />
+            <DataPreview data={filteredCurrent} />
           </div>
         </div>
       )}
@@ -1911,7 +2012,7 @@ function DiscrepancyTable({ report }) {
 }
 
 function Panel({ title, badge }) { return <div className="panelhead"><div><p className="eyebrow">AUDIT REVIEW</p><h2>{title}</h2></div><b className="badge">{badge}</b></div>; }
-function Changes({ title, rows, field, threshold }) {
+function Changes({ title, rows, field, threshold, branch = "" }) {
   return (
     <section className="panel">
       <Panel title={title} badge={`${threshold}%+ change or new entry`} />
@@ -1927,7 +2028,7 @@ function Changes({ title, rows, field, threshold }) {
         )) : <tr><td colSpan="5"><Empty>No material movements found.</Empty></td></tr>}
       </Table>
       {rows.length > 0 && (
-        <CopyChangesButton title={title} rows={rows} field={field} threshold={threshold} />
+        <CopyChangesButton title={title} rows={rows} field={field} threshold={threshold} branch={branch} />
       )}
     </section>
   );
@@ -1978,14 +2079,14 @@ function CopyDuplicatesButton({ duplicates }) {
   );
 }
 
-function CopyChangesButton({ title, rows, field, threshold }) {
+function CopyChangesButton({ title, rows, field, threshold, branch = "" }) {
   const [copied, setCopied] = useState(false);
 
   function handleCopy() {
     const cleanTsvVal = (val) => String(val ?? "").replace(/\t/g, " ").replace(/\r?\n/g, " ");
     const tsvRows = [];
     rows.forEach(x => {
-      const branch = "";
+      const branchVal = cleanTsvVal(branch);
       const date = "";
       const category = "";
       const type = "";
@@ -1997,7 +2098,7 @@ function CopyChangesButton({ title, rows, field, threshold }) {
         : `Item: ${x.label} | Current: ${show(x.total)} | Previous: ${show(x.old)} | Change: ${diffStr} | Status: ${x.status}`
       );
 
-      tsvRows.push([branch, date, category, type, supplier, error, review].join("\t"));
+      tsvRows.push([branchVal, date, category, type, supplier, error, review].join("\t"));
     });
 
     navigator.clipboard.writeText(tsvRows.join("\n")).then(() => {
