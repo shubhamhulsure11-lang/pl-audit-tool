@@ -2262,7 +2262,70 @@ export default function Home() {
           onOpenSetup={() => setShowAiSetup(true)}
         />
       )}
+
+      {/* Signature Footer Branding */}
+      <Footer />
     </main>
+  );
+}
+
+function Footer() {
+  return (
+    <footer className="site-footer">
+      <div className="footer-inner">
+        <div className="footer-brand">
+          <div className="footer-title">
+            <span>P&L AUDIT DESK</span>
+            <span className="footer-name-badge">BUILT BY SHUBHAM HULSURE</span>
+          </div>
+          <div className="footer-sub">
+            <span>Full-Stack AI & Financial Systems Architect</span>
+            <span style={{ color: "var(--border-2)" }}>|</span>
+            <span>Autonomous Reconciliation & Audit Engine</span>
+          </div>
+        </div>
+
+        <div className="footer-meta">
+          <div>
+            <span className="footer-status-dot" />
+            <span>Local In-Memory Processing · Zero Data Exposure</span>
+          </div>
+        </div>
+
+        <div className="footer-actions">
+          <a
+            href="https://www.linkedin.com/in/shubham-hulsure-981a1a295"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="footer-btn linkedin"
+            title="Connect with Shubham Hulsure on LinkedIn"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M19 3a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h14m-.5 15.5v-5.3a3.26 3.26 0 0 0-3.26-3.26c-.85 0-1.84.52-2.28 1.3v-1.11h-2.79v8.37h2.79v-4.93c0-.77.62-1.4 1.39-1.4a1.4 1.4 0 0 1 1.4 1.4v4.93h2.75M6.46 10.9h2.79v8.37H6.46v-8.37M7.86 6.3a1.63 1.63 0 0 0-1.63 1.62c0 .9.73 1.63 1.63 1.63.9 0 1.63-.73 1.63-1.63A1.63 1.63 0 0 0 7.86 6.3Z"/>
+            </svg>
+            <span>Shubham Hulsure</span>
+            <span style={{ opacity: 0.6, fontSize: "11px" }}>↗</span>
+          </a>
+          <a
+            href="https://github.com/shubhamhulsure11-lang/pl-audit-tool"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="footer-btn github"
+            title="View Project on GitHub"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2A10 10 0 0 0 2 12c0 4.42 2.87 8.17 6.84 9.5.5.08.66-.23.66-.5v-1.69c-2.77.6-3.36-1.34-3.36-1.34-.46-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.87 1.52 2.34 1.07 2.91.83.1-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.92 0-1.11.38-2 1.03-2.71-.1-.25-.45-1.29.1-2.64 0 0 .84-.27 2.75 1.02.79-.22 1.65-.33 2.5-.33.85 0 1.71.11 2.5.33 1.91-1.29 2.75-1.02 2.75-1.02.55 1.35.2 2.39.1 2.64.65.71 1.03 1.6 1.03 2.71 0 3.82-2.34 4.66-4.57 4.91.36.31.69.92.69 1.85V21c0 .27.16.59.67.5C19.14 20.16 22 16.42 22 12A10 10 0 0 0 12 2Z"/>
+            </svg>
+            <span>GitHub</span>
+          </a>
+        </div>
+      </div>
+
+      <div className="footer-bottom">
+        <span>Architected for multi-branch hospitality, QSRs, & enterprise finance teams.</span>
+        <span>© 2026 Shubham Hulsure · All rights reserved</span>
+      </div>
+    </footer>
   );
 }
 

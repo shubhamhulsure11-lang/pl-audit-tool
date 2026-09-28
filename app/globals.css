@@ -1954,6 +1954,159 @@ tr:last-child td { border-bottom: 0; }
   .pivot-items-table { padding: 0 12px 10px 32px; }
   .pivot-right .pivot-share { display: none; }
   .pivot-toolbar { padding: 12px 16px; }
-  nav { gap: 0; }
-  nav button { padding: 10px 12px; font-size: 12px; }
+}
+
+/* ─────────────────────────────────────────────────────────────────
+   SITE FOOTER / CREATOR BRANDING
+───────────────────────────────────────────────────────────────── */
+.site-footer {
+  margin-top: 60px;
+  border-top: 1px solid var(--border);
+  background: linear-gradient(180deg, rgba(17, 21, 32, 0.6) 0%, rgba(10, 13, 18, 0.95) 100%);
+  border-radius: 16px;
+  padding: 30px 32px 20px;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.25);
+}
+
+.site-footer::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 8%;
+  right: 8%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--accent), var(--violet), transparent);
+}
+
+.footer-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.footer-brand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.footer-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: 'Syne', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: -0.01em;
+}
+
+.footer-name-badge {
+  color: var(--accent);
+  background: var(--accent-dim);
+  border: 1px solid rgba(0, 229, 160, 0.35);
+  padding: 3px 10px;
+  border-radius: 6px;
+  font-family: 'Geist Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.footer-sub {
+  font-size: 13px;
+  color: var(--text-2);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: 'Geist', sans-serif;
+}
+
+.footer-meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--muted);
+  font-family: 'Geist Mono', monospace;
+}
+
+.footer-status-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+  margin-right: 6px;
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.footer-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-family: 'Geist', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all 0.2s ease;
+  border: 1px solid var(--border-2);
+  background: var(--surface-2);
+  color: var(--ink);
+}
+
+.footer-btn:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  box-shadow: 0 4px 12px rgba(0, 229, 160, 0.15);
+  color: #fff;
+}
+
+.footer-btn.linkedin {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.12), rgba(124, 58, 255, 0.12));
+  border-color: rgba(14, 165, 233, 0.35);
+  color: #38bdf8;
+}
+
+.footer-btn.linkedin:hover {
+  background: linear-gradient(135deg, rgba(14, 165, 233, 0.25), rgba(124, 58, 255, 0.25));
+  border-color: #38bdf8;
+  color: #fff;
+}
+
+.footer-btn.github {
+  border-color: var(--border-2);
+  color: var(--text-2);
+}
+
+.footer-btn.github:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+.footer-bottom {
+  margin-top: 20px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-4);
+  font-family: 'Geist', sans-serif;
+  flex-wrap: wrap;
+  gap: 10px;
 }
