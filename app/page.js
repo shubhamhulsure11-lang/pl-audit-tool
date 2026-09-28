@@ -1570,7 +1570,7 @@ export default function Home() {
         </div>
       </header>
 
-      <div style={{ display: "flex", gap: 0, borderBottom: "1px solid var(--line)", marginBottom: 24 }}>
+      <div style={{ display: "flex", gap: 4, borderBottom: "1px solid var(--border)", marginBottom: 28, paddingLeft: 4 }}>
         {[
           { id: "purchase", label: "Purchase Audit", sub: "Zoho P&L" },
           { id: "sales",    label: "Sales Reconciliation", sub: "POS & Aggregators" },
@@ -1579,16 +1579,32 @@ export default function Home() {
             key={t.id}
             onClick={() => setMainTab(t.id)}
             style={{
-              background: "none", border: 0,
-              padding: "14px 24px",
+              position: "relative",
+              background: "none",
+              border: 0,
+              padding: "12px 20px",
               cursor: "pointer",
               textAlign: "left",
-              borderBottom: mainTab === t.id ? "2px solid var(--forest)" : "2px solid transparent",
-              transition: "0.15s",
+              borderBottom: mainTab === t.id ? "2px solid var(--accent)" : "2px solid transparent",
+              transition: "all 0.2s",
+              borderRadius: "8px 8px 0 0",
             }}
           >
-            <span style={{ display: "block", fontWeight: 700, fontSize: "0.9rem", color: mainTab === t.id ? "var(--forest)" : "var(--muted)" }}>{t.label}</span>
-            <span style={{ display: "block", fontSize: "0.72rem", color: "var(--muted)", marginTop: 2 }}>{t.sub}</span>
+            <span style={{
+              display: "block",
+              fontFamily: "'Geist', sans-serif",
+              fontWeight: 600,
+              fontSize: "13px",
+              color: mainTab === t.id ? "var(--accent)" : "var(--muted)",
+              letterSpacing: "0.01em",
+            }}>{t.label}</span>
+            <span style={{
+              display: "block",
+              fontSize: "11px",
+              color: mainTab === t.id ? "rgba(0,229,160,0.6)" : "var(--text-4)",
+              marginTop: 2,
+              fontFamily: "'Geist Mono', monospace",
+            }}>{t.sub}</span>
           </button>
         ))}
       </div>
