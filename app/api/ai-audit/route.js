@@ -67,14 +67,79 @@ function parseResult(rawContent) {
   }
 }
 
+// ─── Batch Audit System Prompt ──────────────────────────────────────────────
+const BATCH_SYSTEM_PROMPT = `You are an expert hospitality and restaurant accounting auditor.
+Analyze the provided batch of items and determine if their current_account_head is correct, or if they should be reclassified to one of the provided accounts list.
+
+RULES:
+1. Vendor name is supporting context only. NEVER treat vendor as an account head.
+2. Only recommend an account head from the provided accounts list. NEVER invent new account heads.
+3. If an item is already correctly classified, return classification: "correct", recommended_account_head: current_account_head.
+4. Only classify as "definite_correction" when there is a strong, definitive accounting basis (confidence >= 0.85).
+5. If the description is ambiguous or lacks enough information to decide, return classification: "needs_verification", recommended_account_head: "Needs invoice/use verification", confidence: 0.60.
+6. DO NOT OVER-CORRECT. Do not change an account head simply because another is theoretically possible.
+
+Return ONLY a JSON object:
+{"results": [{"profileKey": "", "item": "", "current_account_head": "", "recommended_account_head": "", "classification": "definite_correction"|"needs_verification"|"correct", "confidence": 0.95, "reason": ""}]}`;
+
 // ─── Route ────────────────────────────────────────────────────────────────────
 
 export async function POST(req) {
   try {
     const body = await req.json();
-    const { singleItem, availableAccounts = [], apiKey, model, fallbackModel } = body;
+    const { singleItem, batchAuditItems, availableAccounts = [], apiKey, model, fallbackModel } = body;
 
     if (!apiKey) return NextResponse.json({ error: "No API key. Use ⚙️ AI Setup." }, { status: 400 });
+
+    // ── Batch Mode for Account Head Auditor ──────────────────────────────────
+    if (batchAuditItems && Array.isArray(batchAuditItems)) {
+      const PRIMARY_MODEL = model || "llama-3.1-8b-instant";
+      const payload = {
+        accounts: (availableAccounts || []).slice(0, 30),
+        items: batchAuditItems.slice(0, 25).map(b => ({
+          profileKey: b.profileKey || b.item,
+          item: b.item,
+          vendor: b.vendor,
+          current_account_head: b.current_account_head,
+          amount: b.amount
+        }))
+      };
+
+      const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({
+          model: PRIMARY_MODEL,
+          messages: [
+            { role: "system", content: BATCH_SYSTEM_PROMPT },
+            { role: "user", content: JSON.stringify(payload) }
+          ],
+          temperature: 0.1,
+          max_tokens: 1500,
+          response_format: { type: "json_object" }
+        })
+      });
+
+      if (res.status === 429) {
+        const errText = await res.text();
+        let errMsg = "";
+        try { errMsg = JSON.parse(errText)?.error?.message || ""; } catch { /* ignore */ }
+        return NextResponse.json({ error: "Rate limited", retryAfter: parseRetryAfter(errMsg) }, { status: 429 });
+      }
+
+      if (!res.ok) {
+        const errText = await res.text();
+        return NextResponse.json({ error: `Groq error (${res.status}): ${errText}` }, { status: res.status });
+      }
+
+      const resData = await res.json();
+      const parsed = parseResult(resData.choices?.[0]?.message?.content);
+      const results = parsed?.results || [];
+
+      return NextResponse.json({ success: true, results, model: PRIMARY_MODEL });
+    }
+
+    // ── Single Item Mode (Backward compatibility for MisclassificationsView) ──
     if (!singleItem) return NextResponse.json({ error: "No item provided." }, { status: 400 });
 
     const { item, vendor, actualAccount, suggestedAccount, matchedKeyword, total } = singleItem;

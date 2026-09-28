@@ -1134,6 +1134,271 @@ tr:last-child td { border-bottom: 0; }
 .bullet { color: var(--border-2); margin-right: 6px; font-size: 14px; }
 
 /* ─────────────────────────────────────────────────────────────────
+   AUTOMATED ACCOUNT HEAD AUDITOR
+───────────────────────────────────────────────────────────────── */
+.account-audit-panel {
+  margin-top: 24px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+  animation: fadeIn 0.25s ease-out;
+}
+
+.account-audit-header {
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 16px;
+  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
+}
+
+.audit-context-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.audit-context-input-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-2);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+.audit-context-input-group label {
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+}
+.audit-context-input-group input {
+  background: transparent;
+  border: none;
+  color: var(--ink);
+  font-weight: 600;
+  font-size: 12px;
+  outline: none;
+  width: 140px;
+}
+
+.audit-review-btn {
+  background: var(--accent);
+  color: #05080E;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 10px rgba(0, 229, 160, 0.2);
+}
+.audit-review-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px rgba(0, 229, 160, 0.35);
+  filter: brightness(1.05);
+}
+.audit-review-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.audit-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  padding: 20px 24px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.audit-stat-card {
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+.audit-stat-card::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 4px;
+}
+.audit-stat-card.reviewed::before { background: var(--sky); }
+.audit-stat-card.definite::before { background: var(--red); }
+.audit-stat-card.verification::before { background: var(--amber); }
+.audit-stat-card.correct::before { background: var(--green); }
+
+.audit-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.audit-stat-val {
+  font-size: 24px;
+  font-weight: 800;
+  font-family: 'Syne', sans-serif;
+  color: var(--ink);
+}
+.audit-stat-card.definite .audit-stat-val { color: var(--red); }
+.audit-stat-card.verification .audit-stat-val { color: var(--amber); }
+.audit-stat-card.correct .audit-stat-val { color: var(--green); }
+
+.audit-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 24px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.audit-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.audit-action-btn {
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--border-2);
+  padding: 7px 13px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+.audit-action-btn:hover {
+  background: var(--surface-3);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.audit-action-btn.active-success {
+  background: rgba(34, 197, 94, 0.15);
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.audit-section-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px 10px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+}
+.audit-section-heading.definite { color: #FFA3A3; }
+.audit-section-heading.verification { color: #FCD34D; }
+
+.audit-table-wrap {
+  padding: 0 24px 24px;
+  overflow-x: auto;
+}
+.audit-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  text-align: left;
+}
+.audit-table th {
+  background: var(--surface-2);
+  color: var(--muted);
+  font-weight: 600;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  letter-spacing: 0.03em;
+  font-size: 11px;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.audit-table td {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+  vertical-align: top;
+}
+.audit-table tr:hover td {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.audit-badge-definite {
+  background: rgba(255, 77, 77, 0.15);
+  color: #FF6E6E;
+  border: 1px solid rgba(255, 77, 77, 0.3);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 11px;
+}
+.audit-badge-verification {
+  background: rgba(245, 158, 11, 0.15);
+  color: #FBBF24;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-weight: 600;
+  font-size: 11px;
+}
+
+.audit-progress-container {
+  padding: 24px;
+  text-align: center;
+  background: var(--surface);
+}
+.audit-progress-bar-bg {
+  width: 100%;
+  max-width: 480px;
+  height: 8px;
+  background: var(--surface-2);
+  border-radius: 4px;
+  margin: 12px auto;
+  overflow: hidden;
+}
+.audit-progress-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent) 0%, #38BDF8 100%);
+  border-radius: 4px;
+  transition: width 0.2s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+
+
+/* ─────────────────────────────────────────────────────────────────
    COLUMN MAP BAR (Data Verification)
 ───────────────────────────────────────────────────────────────── */
 .col-map-bar {

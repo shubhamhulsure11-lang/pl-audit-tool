@@ -22,6 +22,11 @@ import {
   getSummaryRowDefs,
   getDiscrepancyRowDefs,
 } from "./lib/reconEngines";
+import {
+  runAccountHeadAudit,
+  generateTsvCopy,
+  exportAuditResultsToExcel
+} from "./lib/accountHeadAudit";
 
 const inr = new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 });
 const clean = (v) => String(v ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -817,10 +822,45 @@ function MisclassificationsView({ items, current, onGoToPivot, sharedApiKey, sha
   );
 }
 
-function AccountPivot({ current }) {
+function AccountPivot({
+  current,
+  sharedApiKey,
+  sharedModel,
+  onOpenSetup,
+  initialClientName = "",
+  initialPeriodName = "",
+  onClientNameChange,
+  onPeriodNameChange
+}) {
   const [expandedAccs, setExpandedAccs] = useState(() => new Set());
   const [expandedVendors, setExpandedVendors] = useState(() => new Set());
   const [query, setQuery] = useState("");
+
+  // Client & Period context for audit
+  const [clientName, setClientName] = useState(() => {
+    if (initialClientName) return initialClientName;
+    if (current?.name) {
+      const base = current.name.replace(/\.[^/.]+$/, "").split(/[-_]/)[0];
+      return base || "Client";
+    }
+    return "Client";
+  });
+
+  const [periodName, setPeriodName] = useState(() => {
+    if (initialPeriodName) return initialPeriodName;
+    if (current?.records?.[0]?.date) {
+      const d = String(current.records[0].date);
+      return d.substring(0, 7) || "Current Period";
+    }
+    return "Current Period";
+  });
+
+  // Audit state
+  const [isAuditing, setIsAuditing] = useState(false);
+  const [auditProgress, setAuditProgress] = useState(null); // { processed, total, message }
+  const [auditResult, setAuditResult] = useState(null);
+  const [auditError, setAuditError] = useState("");
+  const [copiedKey, setCopiedKey] = useState(null);
 
   const pivotData = useMemo(() => {
     if (!current?.records) return { tree: [], totalSpend: 0, accCount: 0, vendorCount: 0 };
@@ -966,6 +1006,60 @@ function AccountPivot({ current }) {
     document.body.removeChild(link);
   };
 
+  // ── Automated Account Head Audit Handler ──
+  const handleRunAudit = async () => {
+    setAuditError("");
+    if (!current?.records || current.records.length === 0) {
+      setAuditError("No records found in the selected Account Heads dataset.");
+      return;
+    }
+    if (!clientName.trim() || !periodName.trim()) {
+      setAuditError("The audit requires both Client and Period context. Please fill in both fields above.");
+      return;
+    }
+
+    setIsAuditing(true);
+    setAuditProgress({ processed: 0, total: current.records.length, message: "Extracting underlying records..." });
+
+    try {
+      const availableHeads = pivotData.tree.map(a => a.name).filter(Boolean);
+      const res = await runAccountHeadAudit({
+        records: current.records,
+        availableHeads,
+        clientName: clientName.trim(),
+        periodName: periodName.trim(),
+        apiKey: sharedApiKey,
+        model: sharedModel,
+        onProgress: (done, total, msg) => {
+          setAuditProgress({ processed: done, total, message: msg });
+        }
+      });
+      setAuditResult(res);
+    } catch (err) {
+      setAuditError(err.message || "Failed to execute Account Head Audit.");
+    } finally {
+      setIsAuditing(false);
+      setAuditProgress(null);
+    }
+  };
+
+  const handleCopy = (mode) => {
+    if (!auditResult) return;
+    const tsv = generateTsvCopy(auditResult.allRowAudits, mode);
+    navigator.clipboard.writeText(tsv);
+    setCopiedKey(mode);
+    setTimeout(() => setCopiedKey(null), 2500);
+  };
+
+  const handleExportExcel = () => {
+    if (!auditResult) return;
+    exportAuditResultsToExcel({
+      auditResult,
+      clientName: clientName.trim(),
+      periodName: periodName.trim()
+    });
+  };
+
   const isSearching = query.trim().length > 0;
   const isAccOpen = (name) => isSearching || expandedAccs.has(name);
   const isVendorOpen = (key) => isSearching || expandedVendors.has(key);
@@ -974,7 +1068,7 @@ function AccountPivot({ current }) {
     <section className="panel">
       <div className="panelhead">
         <div>
-          <p className="eyebrow">CURRENT MONTH P&L HIERARCHY</p>
+          <p className="eyebrow">CURRENT MONTH P&L HIERARCHY & AUDIT</p>
           <h2>Account Heads Breakdown</h2>
         </div>
         <div className="pivot-summary-badges">
@@ -994,6 +1088,66 @@ function AccountPivot({ current }) {
         </div>
       )}
 
+      {/* Client and Period Context Bar */}
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "space-between",
+        flexWrap: "wrap",
+        gap: 12,
+        padding: "10px 24px",
+        background: "var(--surface-2)",
+        borderBottom: "1px solid var(--border)",
+        fontSize: "12px"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <div className="audit-context-input-group">
+            <label>Client</label>
+            <input
+              type="text"
+              value={clientName}
+              placeholder="e.g. Kailash Parbat"
+              onChange={e => {
+                setClientName(e.target.value);
+                if (onClientNameChange) onClientNameChange(e.target.value);
+              }}
+            />
+          </div>
+          <div className="audit-context-input-group">
+            <label>Period</label>
+            <input
+              type="text"
+              value={periodName}
+              placeholder="e.g. April 2024"
+              onChange={e => {
+                setPeriodName(e.target.value);
+                if (onPeriodNameChange) onPeriodNameChange(e.target.value);
+              }}
+            />
+          </div>
+          <span style={{ color: "var(--muted)", fontSize: "11px" }}>
+            Dataset: <strong>{current?.records?.length || 0}</strong> rows from <em>{current?.name || "Uploaded File"}</em>
+          </span>
+        </div>
+
+        {sharedApiKey && (
+          <span style={{ fontSize: "11px", color: "var(--accent)" }}>
+            ⚡ AI Layer Active ({sharedModel ? sharedModel.replace("llama-", "").replace("-instant", "").replace("-versatile", "") : "Groq"})
+          </span>
+        )}
+      </div>
+
+      {auditError && (
+        <div className="pivot-warning" style={{ borderColor: "var(--red)", background: "rgba(255, 77, 77, 0.1)" }}>
+          <span style={{ color: "var(--red)" }}>⚠️</span>
+          <div>
+            <strong style={{ color: "var(--red)" }}>Audit Validation Error</strong>
+            <small style={{ color: "var(--ink)" }}>{auditError}</small>
+          </div>
+        </div>
+      )}
+
+      {/* Toolbar: Existing Controls + Review Account Heads */}
       <div className="pivot-toolbar">
         <div className="pivot-search-wrap">
           <span>🔍</span>
@@ -1008,10 +1162,220 @@ function AccountPivot({ current }) {
         </div>
         <div className="pivot-actions">
           <button className="pivot-btn" onClick={exportCSV}>Export CSV</button>
+          <button
+            className="audit-review-btn"
+            onClick={handleRunAudit}
+            disabled={isAuditing}
+            title="Automatically audit 100% of underlying records without CSV download or re-upload"
+          >
+            {isAuditing ? "Auditing..." : "🔍 Review Account Heads"}
+          </button>
           <button className="pivot-btn" onClick={expandAll}>Expand all</button>
           <button className="pivot-btn" onClick={collapseAll}>Collapse all</button>
         </div>
       </div>
+
+      {/* Real-Time Audit Progress */}
+      {isAuditing && (
+        <div className="audit-progress-container">
+          <div style={{ display: "flex", justifyContent: "space-between", maxWidth: 480, margin: "0 auto 6px", fontSize: "12px" }}>
+            <strong style={{ color: "var(--accent)" }}>Analyzing Account Heads...</strong>
+            <span style={{ color: "var(--muted)" }}>Processed: {auditProgress?.processed || 0} / {auditProgress?.total || 0}</span>
+          </div>
+          <div className="audit-progress-bar-bg">
+            <div
+              className="audit-progress-bar-fill"
+              style={{ width: `${Math.round(((auditProgress?.processed || 0) / (auditProgress?.total || 1)) * 100)}%` }}
+            />
+          </div>
+          <p style={{ fontSize: "11px", color: "var(--muted)", margin: "4px 0 0" }}>
+            {auditProgress?.message || "Auditing records..."}
+          </p>
+        </div>
+      )}
+
+      {/* ── AUTOMATED ACCOUNT HEAD AUDIT RESULTS PANEL ── */}
+      {auditResult && !isAuditing && (
+        <div className="account-audit-panel">
+          <div className="account-audit-header">
+            <div>
+              <p className="eyebrow" style={{ color: "var(--accent)" }}>AUDIT ENGINE RESULTS</p>
+              <h2 style={{ fontSize: "20px" }}>Account Head Audit</h2>
+              <p style={{ margin: "2px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+                Client: <strong style={{ color: "var(--ink)" }}>{auditResult.clientName}</strong> · Period: <strong style={{ color: "var(--ink)" }}>{auditResult.periodName}</strong>
+              </p>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span className="badge" style={{ background: "rgba(0, 229, 160, 0.15)", color: "var(--accent)", border: "1px solid var(--accent)" }}>
+                ✓ 100% Reviewed ({auditResult.totalRows} rows)
+              </span>
+            </div>
+          </div>
+
+          {/* Summary Dashboard Cards */}
+          <div className="audit-stat-grid">
+            <div className="audit-stat-card reviewed">
+              <span className="audit-stat-label">Rows Reviewed</span>
+              <span className="audit-stat-val">{auditResult.totalRows}</span>
+              <small style={{ color: "var(--muted)", fontSize: "10px" }}>100% of underlying records</small>
+            </div>
+            <div className="audit-stat-card definite">
+              <span className="audit-stat-label">🔴 Definite Corrections</span>
+              <span className="audit-stat-val">{auditResult.summary.definiteCount}</span>
+              <small style={{ color: "var(--red)", fontSize: "10px" }}>Immediate reclassifications</small>
+            </div>
+            <div className="audit-stat-card verification">
+              <span className="audit-stat-label">🟠 Needs Verification</span>
+              <span className="audit-stat-val">{auditResult.summary.verificationCount}</span>
+              <small style={{ color: "var(--amber)", fontSize: "10px" }}>Ambiguous / invoice review</small>
+            </div>
+            <div className="audit-stat-card correct">
+              <span className="audit-stat-label">🟢 No Issue</span>
+              <span className="audit-stat-val">{auditResult.summary.correctCount}</span>
+              <small style={{ color: "var(--green)", fontSize: "10px" }}>Verified compliant</small>
+            </div>
+          </div>
+
+          {/* Audit Action Bar (Copy + Export) */}
+          <div className="audit-toolbar">
+            <div className="audit-toolbar-actions">
+              <button
+                className={`audit-action-btn ${copiedKey === "all_corrections" ? "active-success" : ""}`}
+                onClick={() => handleCopy("all_corrections")}
+                title="Copy all flagged items (Item \t Current Head \t Recommended Head) for Excel"
+              >
+                {copiedKey === "all_corrections" ? "✓ Copied All" : "📋 Copy Corrections"}
+              </button>
+              <button
+                className={`audit-action-btn ${copiedKey === "definite" ? "active-success" : ""}`}
+                onClick={() => handleCopy("definite")}
+                disabled={auditResult.summary.definiteCount === 0}
+              >
+                {copiedKey === "definite" ? "✓ Copied" : "📋 Copy Definite Corrections"}
+              </button>
+              <button
+                className={`audit-action-btn ${copiedKey === "verification" ? "active-success" : ""}`}
+                onClick={() => handleCopy("verification")}
+                disabled={auditResult.summary.verificationCount === 0}
+              >
+                {copiedKey === "verification" ? "✓ Copied" : "📋 Copy Verification Items"}
+              </button>
+              <button
+                className="audit-action-btn"
+                onClick={handleExportExcel}
+                style={{ background: "rgba(0, 229, 160, 0.12)", color: "var(--accent)", borderColor: "var(--accent)" }}
+              >
+                📥 Export Results (.xlsx)
+              </button>
+            </div>
+
+            <div>
+              <button
+                className="pivot-btn"
+                onClick={() => setAuditResult(null)}
+                style={{ fontSize: "11px", padding: "4px 8px" }}
+              >
+                ✕ Dismiss Report
+              </button>
+            </div>
+          </div>
+
+          {/* Section 1: Definite Corrections */}
+          {auditResult.definiteCorrections.length > 0 && (
+            <div>
+              <div className="audit-section-heading definite">
+                <span>🔴</span>
+                <span>Definite corrections ({auditResult.definiteCorrections.length})</span>
+              </div>
+              <div className="audit-table-wrap">
+                <table className="audit-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 40 }}>#</th>
+                      <th>Item Description</th>
+                      <th>Vendor</th>
+                      <th>Current Account Head</th>
+                      <th>Recommended Account Head</th>
+                      <th>Why</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditResult.definiteCorrections.map((r, i) => (
+                      <tr key={r.rowId ?? i}>
+                        <td style={{ color: "var(--muted)", fontWeight: 600 }}>{i + 1}</td>
+                        <td style={{ fontWeight: 600, color: "var(--ink)" }}>{r.item}</td>
+                        <td style={{ color: "var(--text-2)" }}>{r.vendor || "—"}</td>
+                        <td>
+                          <span style={{ textDecoration: "line-through", color: "var(--muted)", marginRight: 6 }}>
+                            {r.current_account_head}
+                          </span>
+                        </td>
+                        <td>
+                          <span className="audit-badge-definite">
+                            {r.recommended_account_head}
+                          </span>
+                        </td>
+                        <td style={{ color: "var(--text-2)", fontSize: "11px" }}>{r.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Section 2: Needs Verification */}
+          {auditResult.needsVerification.length > 0 && (
+            <div>
+              <div className="audit-section-heading verification">
+                <span>🟠</span>
+                <span>Needs invoice/use verification ({auditResult.needsVerification.length})</span>
+              </div>
+              <div className="audit-table-wrap">
+                <table className="audit-table">
+                  <thead>
+                    <tr>
+                      <th style={{ width: 40 }}>#</th>
+                      <th>Item Description</th>
+                      <th>Vendor</th>
+                      <th>Current Account Head</th>
+                      <th>Recommended Account Head</th>
+                      <th>Why</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditResult.needsVerification.map((r, i) => (
+                      <tr key={r.rowId ?? i}>
+                        <td style={{ color: "var(--muted)", fontWeight: 600 }}>{i + 1}</td>
+                        <td style={{ fontWeight: 600, color: "var(--ink)" }}>{r.item}</td>
+                        <td style={{ color: "var(--text-2)" }}>{r.vendor || "—"}</td>
+                        <td style={{ color: "var(--ink)" }}>{r.current_account_head}</td>
+                        <td>
+                          <span className="audit-badge-verification">
+                            {r.recommended_account_head}
+                          </span>
+                        </td>
+                        <td style={{ color: "var(--text-2)", fontSize: "11px" }}>{r.reason}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Perfect State Banner */}
+          {auditResult.definiteCorrections.length === 0 && auditResult.needsVerification.length === 0 && (
+            <div style={{ padding: "32px 24px", textAlign: "center", color: "var(--green)" }}>
+              <span style={{ fontSize: "32px", display: "block", marginBottom: 8 }}>🟢</span>
+              <strong style={{ fontSize: "16px" }}>All Account Heads Verified Compliant</strong>
+              <p style={{ color: "var(--muted)", fontSize: "13px", marginTop: 4 }}>
+                All {auditResult.totalRows} rows were audited against hard rules, categorization heuristics, and consistency checks with 0 issues detected.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="pivot-tree">
         {pivotData.tree.length === 0 ? (
@@ -1478,6 +1842,8 @@ export default function Home() {
   const [mainTab, setMainTab] = useState("purchase");
   const [current, setCurrent] = useState(null), [previous, setPrevious] = useState(null), [error, setError] = useState(""), [tab, setTab] = useState("Overview");
   const [selectedBranch, setSelectedBranch] = useState("all");
+  const [purchaseClient, setPurchaseClient] = useState("");
+  const [purchasePeriod, setPurchasePeriod] = useState("");
   const [thresholds, setThresholds] = useState({ vendor: 20, item: 25, price: 20 });
   const [aiConfig, setAiConfig] = useState(() => {
     if (typeof window === "undefined") return null;
@@ -1780,7 +2146,18 @@ export default function Home() {
                 />
               )}
 
-              {tab === "Account heads" && <AccountPivot current={filteredCurrent} />}
+              {tab === "Account heads" && (
+                <AccountPivot
+                  current={filteredCurrent}
+                  sharedApiKey={apiKey}
+                  sharedModel={groqModel}
+                  onOpenSetup={() => setShowAiSetup(true)}
+                  initialClientName={purchaseClient}
+                  initialPeriodName={purchasePeriod}
+                  onClientNameChange={setPurchaseClient}
+                  onPeriodNameChange={setPurchasePeriod}
+                />
+              )}
 
               {tab === "Duplicate bills" && (
                 <section className="panel">
