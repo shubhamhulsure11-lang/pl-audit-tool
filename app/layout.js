@@ -1,4 +1,6 @@
 import "./globals.css";
+import { Analytics } from "@vercel/analytics/react";
+
 export const metadata = {
   title: "AuditDesk Pro | P&L Audit & Sales Reconciliation",
   description: "Premium financial audit platform for restaurant chains and multi-outlet food businesses — powered by AI."
@@ -14,7 +16,10 @@ export default function RootLayout({ children }) {
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        {children}
+        <Analytics />
+      </body>
     </html>
   );
 }
